@@ -1,0 +1,260 @@
+---
+title: "Beta diversity -- unweighted UniFrac distance"
+format:
+  html:
+    toc: true
+    code-fold: true
+    embed-resources: true
+---
+
+## Data preparation
+
+```{r packages}
+#| warning: false
+
+library(sauerkrautTaxonomyBuddy)
+library(SummarizedExperiment) # microbiome analysis
+library(vegan)                # distance metric calculation
+
+library(dplyr)      # data handling
+library(tidyr)      # data transformation
+library(ggplot2)    # data visualization
+library(patchwork)  # aligning ggplot objects in a grid
+library(kableExtra) # table printing
+
+# set ggplot2 theme
+theme_set(
+  theme_minimal() +
+    theme(plot.title    = element_text(hjust = 0.5),
+          plot.subtitle = element_text(hjust = 0.5))
+)
+```
+
+```{r set file paths}
+define_dataPaths()
+```
+
+```{r data preparation}
+#| warning: false
+
+tse <- readAndPrepare_mainTaxonomicData(path_groupInfoRdata               = path_groupInfoRdata,
+                                        path_participantRdata             = path_participantRdata,
+                                        path_samplesIDxlsx                = path_samplesIDxlsx,
+                                        path_dietInfoCsv                  = path_dietInfoCsv,
+                                        path_nutrientInfoCsv              = path_nutrientInfoCsv,
+                                        path_bloodMetabolomeXlsx          = path_bloodMetabolomeXlsx,
+                                        path_stoolMetabolomeXlsx          = path_stoolMetabolomeXlsx,
+                                        path_T4questXlsx                  = path_T4questXlsx,
+                                        path_stoolInfoXlsx                = path_stoolInfoXlsx,
+                                        path_bodyMeasuresXlsx             = path_bodyMeasuresXlsx,
+                                        path_absTaxonomyData              = path_absTaxonomyData,
+                                        path_relTaxonomyData              = path_relTaxonomyData,
+                                        path_sampleLookupXlsx             = path_sampleLookupXlsx,
+                                        path_krautLookupXlsx              = path_krautLookupXlsx,
+                                        path_bloodMarkerBostonRdata       = path_bloodMarkerBostonRdata,
+                                        path_bloodMarkerZentrallaborRdata = path_bloodMarkerZentrallaborRdata,
+                                        path_bloodMarkerBostonXlsx        = path_bloodMarkerBostonXlsx,
+                                        path_bloodMarkerZentrallaborXlsx  = path_bloodMarkerZentrallaborXlsx,
+                                        aggregation_level                 = "species",
+                                        exclude_sickParticipants          = "taxonomy paper")
+```
+
+
+# Calculate unweighted UniFrac distance matrix
+
+```{r}
+#| warning: false
+
+datDist_list <- calculate_distances(tse, "relAbd")
+
+datDist_intra <- datDist_list$datDist_intraPersonal
+datDist_inter <- datDist_list$datDist_interPersonal
+```
+
+```{r}
+# add strata information
+datDist_intra <- datDist_intra %>% 
+  mutate(age_cat        = case_when(age < 50 ~ paste0(min(age), "-49"),
+                                    TRUE     ~ paste0("50-", max(age))),
+         age_cat        = factor(age_cat),
+         bmi_cat        = case_when(bmi_t0 < 25 ~ paste0("[", floor(min(bmi_t0)), ", 25)"),
+                                    TRUE        ~ paste0("[25, ", ceiling(max(bmi_t0)), "]")),
+         bmi_cat        = factor(bmi_cat))
+```
+
+The pairwise unweighted UniFrac distances in our sample vary between
+`r round(min(datDist_intra$uniFrac_unweighted), 2)` and `r round(max(datDist_intra$uniFrac_unweighted), 2)`
+regarding the intra-personal variability and between
+`r round(min(datDist_inter$uniFrac_unweighted), 2)` and `r round(max(datDist_inter$uniFrac_unweighted), 2)`
+regarding the inter-personal variability.
+The unweighted UniFrac distances have the following distribution:
+
+```{r}
+#| message: false
+#| warning: false
+
+gg1 <- ggplot(datDist_intra, aes(x = uniFrac_unweighted)) + geom_histogram() + xlim(c(0,1)) + ggtitle("Intra-personal unweighted UniFrac distances")
+gg2 <- ggplot(datDist_inter, aes(x = uniFrac_unweighted)) + geom_histogram() + xlim(c(0,1)) + ggtitle("Inter-personal unweighted UniFrac distances")
+
+gg1 / gg2
+```
+
+
+# Intra-personal variation
+
+1. For each timepoint comparison (e.g. *T1 vs. T3*) one unweighted UniFrac distance was
+calculated per person
+2. The following boxplots all depict such comparisons where one timepoint
+measurement of a person was compared to another timepoint measurement of the same
+person. Accordingly, each point encodes **intra-personal variation**.
+3. The displayed dissimilarities vary between 0 (*perfect similarity*)
+and 1 (*no similarity at all*).
+
+
+## Development over the timepoints
+
+```{r}
+datDist_intra %>% 
+  filter(comparison %in% c("T1 vs. T2", "T2 vs. T3", "T3 vs. T4", "T4 vs. T5")) %>% 
+  ggplot(aes(x = comparison, y = uniFrac_unweighted)) +
+  geom_boxplot() +
+  geom_line(aes(group = participant_id, col = participant_id), alpha = 0.3) +
+  facet_wrap(~ group) +
+  theme(axis.title.x    = element_blank(),
+        legend.position = "none")
+```
+
+
+## Variation by intervention
+
+```{r}
+#| message: false
+
+datDist_intra %>% 
+  filter(comparison_group != "other") %>% 
+  ggplot(aes(x = comparison, y = uniFrac_unweighted)) +
+  geom_boxplot() +
+  geom_line(aes(group = participant_id, col = participant_id), alpha = 0.3) +
+  facet_wrap(~ comparison_group, scales = "free_x") +
+  theme(axis.title.x    = element_blank(),
+        legend.position = "none")
+```
+
+
+# Inter-personal variation
+
+```{r}
+datDist_inter %>% 
+  filter(timepoint_group == "baselines") %>% 
+  ggplot(aes(x = timepoint, y = uniFrac_unweighted)) +
+  geom_boxplot() +
+  ylim(c(0,1)) +
+  theme(axis.title.x = element_blank())
+```
+
+
+# Stratified analysis by age, gender, BMI
+
+```{r}
+#| column: page
+#| fig-width: 12
+
+# by age
+datDist_intra %>% 
+  filter(comparison_group != "other",
+         comparison != "T1 vs. T5") %>% 
+  mutate(comparison_group = case_when(comparison_group == "baselines" & comparison == "T1 vs. T3" ~ "Baseline variation\n(1st vs. 2nd baseline)",
+                                      comparison_group == "baselines" & comparison == "T3 vs. T5" ~ "Follow-up variation\n(follow-up vs. 2nd baseline)",
+                                      comparison_group == "fresh intervention"                    ~ "Fresh intervention\n(vs. baseline)",
+                                      comparison_group == "pasteurized intervention"              ~ "Pasteurized intervention\n(vs. baseline)"),
+         comparison_group = factor(comparison_group,
+                                   levels = c("Baseline variation\n(1st vs. 2nd baseline)", "Fresh intervention\n(vs. baseline)",
+                                              "Pasteurized intervention\n(vs. baseline)", "Follow-up variation\n(follow-up vs. 2nd baseline)"))) %>% 
+  ggplot(aes(x = comparison_group, y = uniFrac_unweighted, col = comparison_group)) +
+  geom_boxplot() +
+  scale_y_continuous("Unweighted Unifrac dissimilarity") +
+  scale_color_manual(values = c("gray20","#1F78B4","#FF7F00","gray20")) +
+  facet_wrap(~ age_cat) +
+  ggtitle("Beta diversity", "(baseline and intervention)") +
+  theme(axis.title.x    = element_blank(),
+        legend.position = "none",
+        panel.grid.minor   = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.major.y = element_line(color = "gray95"))
+
+
+# by gender
+datDist_intra %>% 
+  filter(comparison_group != "other",
+         comparison != "T1 vs. T5") %>% 
+  mutate(comparison_group = case_when(comparison_group == "baselines" & comparison == "T1 vs. T3" ~ "Baseline variation\n(1st vs. 2nd baseline)",
+                                      comparison_group == "baselines" & comparison == "T3 vs. T5" ~ "Follow-up variation\n(follow-up vs. 2nd baseline)",
+                                      comparison_group == "fresh intervention"                    ~ "Fresh intervention\n(vs. baseline)",
+                                      comparison_group == "pasteurized intervention"              ~ "Pasteurized intervention\n(vs. baseline)"),
+         comparison_group = factor(comparison_group,
+                                   levels = c("Baseline variation\n(1st vs. 2nd baseline)", "Fresh intervention\n(vs. baseline)",
+                                              "Pasteurized intervention\n(vs. baseline)", "Follow-up variation\n(follow-up vs. 2nd baseline)"))) %>% 
+  ggplot(aes(x = comparison_group, y = uniFrac_unweighted, col = comparison_group)) +
+  geom_boxplot() +
+  scale_y_continuous("Unweighted Unifrac dissimilarity") +
+  scale_color_manual(values = c("gray20","#1F78B4","#FF7F00","gray20")) +
+  facet_wrap(~ gender) +
+  ggtitle("Beta diversity", "(baseline and intervention)") +
+  theme(axis.title.x    = element_blank(),
+        legend.position = "none",
+        panel.grid.minor   = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.major.y = element_line(color = "gray95"))
+
+
+
+# by BMI
+datDist_intra %>% 
+  filter(comparison_group != "other",
+         comparison != "T1 vs. T5") %>% 
+  mutate(comparison_group = case_when(comparison_group == "baselines" & comparison == "T1 vs. T3" ~ "Baseline variation\n(1st vs. 2nd baseline)",
+                                      comparison_group == "baselines" & comparison == "T3 vs. T5" ~ "Follow-up variation\n(follow-up vs. 2nd baseline)",
+                                      comparison_group == "fresh intervention"                    ~ "Fresh intervention\n(vs. baseline)",
+                                      comparison_group == "pasteurized intervention"              ~ "Pasteurized intervention\n(vs. baseline)"),
+         comparison_group = factor(comparison_group,
+                                   levels = c("Baseline variation\n(1st vs. 2nd baseline)", "Fresh intervention\n(vs. baseline)",
+                                              "Pasteurized intervention\n(vs. baseline)", "Follow-up variation\n(follow-up vs. 2nd baseline)"))) %>% 
+  ggplot(aes(x = comparison_group, y = uniFrac_unweighted, col = comparison_group)) +
+  geom_boxplot() +
+  scale_y_continuous("Unweighted Unifrac dissimilarity") +
+  scale_color_manual(values = c("gray20","#1F78B4","#FF7F00","gray20")) +
+  facet_wrap(~ bmi_cat) +
+  ggtitle("Beta diversity", "(baseline and intervention)") +
+  theme(axis.title.x    = element_blank(),
+        legend.position = "none",
+        panel.grid.minor   = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.major.y = element_line(color = "gray95"))
+```
+
+
+# PCoA on unweighted UniFrac distances (all comparisons)
+
+```{r}
+# calculate the unweighted UniFrac distance matrix
+distMatrix_uUF <- tse %>% mia::calculateUnifrac(assay.type = "relAbd", weighted = FALSE)
+
+# PCoA
+pcoa_uUF <- ecodist::pco(distMatrix_uUF)
+
+# All components could be found here: 
+# pcoa_uUF$vectors
+# But we only need the first two to demonstrate what we can do:
+pcoa_df <- data.frame(pcoa1 = pcoa_uUF$vectors[,1], 
+                      pcoa2 = pcoa_uUF$vectors[,2])
+
+# Create a plot
+pcoa_df %>% 
+  mutate(inter_treat = colData(tse)$inter_treat) %>% 
+  ggplot(data = ., aes(x = pcoa1, y = pcoa2, color = inter_treat)) +
+  geom_point() +
+  stat_ellipse() +
+  scale_color_brewer(palette = "Dark2") +
+  ggtitle("unweighted UniFrac-based PCoA") +
+  xlab("PC1") + ylab("PC2")
+```

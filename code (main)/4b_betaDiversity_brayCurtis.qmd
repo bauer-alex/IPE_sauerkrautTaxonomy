@@ -1,0 +1,957 @@
+---
+title: "Beta diversity -- Bray-Curtis dissimilarity"
+format:
+  html:
+    toc: true
+    code-fold: true
+    embed-resources: true
+---
+
+## Data preparation
+
+```{r packages}
+#| warning: false
+
+library(sauerkrautTaxonomyBuddy)
+library(SummarizedExperiment) # microbiome analysis
+library(vegan)                # distance metric calculation
+
+library(scater)     # dimension reduction and visualizations
+library(mgcv)       # estimate smooth surfaces with gam()
+library(APCtools)   # gam visualization
+
+library(dplyr)      # data handling
+library(tidyr)      # data transformation
+library(ggplot2)    # data visualization
+library(patchwork)  # aligning ggplot objects in a grid
+library(ggpubr)     # further ggplot convenience functions
+library(kableExtra) # table printing
+
+# set ggplot2 theme
+theme_set(
+  theme_minimal() +
+    theme(plot.title = element_text(hjust = 0.5),
+          plot.subtitle    = element_text(hjust = 0.5),
+          plot.background  = element_rect(fill = "white", color = "white"))
+)
+```
+
+```{r set file paths}
+define_dataPaths()
+```
+
+```{r data preparation}
+#| warning: false
+
+tse <- readAndPrepare_mainTaxonomicData(path_groupInfoRdata               = path_groupInfoRdata,
+                                        path_participantRdata             = path_participantRdata,
+                                        path_samplesIDxlsx                = path_samplesIDxlsx,
+                                        path_dietInfoCsv                  = path_dietInfoCsv,
+                                        path_nutrientInfoCsv              = path_nutrientInfoCsv,
+                                        path_bloodMetabolomeXlsx          = path_bloodMetabolomeXlsx,
+                                        path_stoolMetabolomeXlsx          = path_stoolMetabolomeXlsx,
+                                        path_T4questXlsx                  = path_T4questXlsx,
+                                        path_stoolInfoXlsx                = path_stoolInfoXlsx,
+                                        path_bodyMeasuresXlsx             = path_bodyMeasuresXlsx,
+                                        path_absTaxonomyData              = path_absTaxonomyData,
+                                        path_relTaxonomyData              = path_relTaxonomyData,
+                                        path_sampleLookupXlsx             = path_sampleLookupXlsx,
+                                        path_krautLookupXlsx              = path_krautLookupXlsx,
+                                        path_bloodMarkerBostonRdata       = path_bloodMarkerBostonRdata,
+                                        path_bloodMarkerZentrallaborRdata = path_bloodMarkerZentrallaborRdata,
+                                        path_bloodMarkerBostonXlsx        = path_bloodMarkerBostonXlsx,
+                                        path_bloodMarkerZentrallaborXlsx  = path_bloodMarkerZentrallaborXlsx,
+                                        aggregation_level                 = "species",
+                                        exclude_sickParticipants          = "taxonomy paper")
+
+# add further features to colData(tse)
+tse <- tse_addTaxaFeatures(tse          = tse,
+                           assay_relAbd = "relAbd")
+
+# save colData() as a separate data.frame
+dat <- tse %>% colData() %>% as.data.frame()
+```
+
+```{r}
+# add strata information
+dat <- dat %>% 
+  mutate(age_cat        = case_when(age < 50 ~ paste0(min(age), "-49"),
+                                    TRUE     ~ paste0("50-", max(age))),
+         age_cat        = factor(age_cat),
+         bmi_cat        = case_when(bmi_t0 < 25 ~ paste0("[", floor(min(bmi_t0)), ", 25)"),
+                                    TRUE        ~ paste0("[25, ", ceiling(max(bmi_t0)), "]")),
+         bmi_cat        = factor(bmi_cat))
+```
+
+```{r estimate UMAP}
+#| warning: false
+#| message: false
+#| results: hide
+
+set.seed(2025)
+tse <- tse %>% runUMAP(name = "UMAP", exprs_values = "relAbd")
+
+dat_UMAP <- tse %>% reducedDim("UMAP") %>% dplyr::bind_cols(dat)
+```
+
+
+# Calculate Bray-Curtis dissimilarity matrix
+
+Bray-Curtis dissimilarities are calculated based on the relative abundances,
+following the [Introduction to Microbiome Data Science](https://microbiome.github.io/course_2021_radboud/beta-diversity.html#pcoa-for-asv-level-data-with-bray-curtis) book.
+
+```{r}
+#| warning: false
+
+datDist_list <- calculate_distances(tse, "relAbd")
+
+datDist_intra <- datDist_list$datDist_intraPersonal
+datDist_inter <- datDist_list$datDist_interPersonal
+```
+
+The pairwise Bray-Curtis dissimilarities in our sample vary between
+`r round(min(datDist_intra$brayCurtis), 2)` and `r round(max(datDist_intra$brayCurtis), 2)`
+regarding the intra-personal variability and between
+`r round(min(datDist_inter$brayCurtis), 2)` and `r round(max(datDist_inter$brayCurtis), 2)`
+regarding the inter-personal variability.
+The Bray-Curtis dissimilarities have the following distribution:
+
+```{r}
+#| message: false
+#| warning: false
+
+gg1 <- ggplot(datDist_intra, aes(x = brayCurtis)) + geom_histogram() + xlim(c(0,1)) + ggtitle("Intra-personal Bray-Curtis dissimilarities")
+gg2 <- ggplot(datDist_inter, aes(x = brayCurtis)) + geom_histogram() + xlim(c(0,1)) + ggtitle("Inter-personal Bray-Curtis dissimilarities")
+
+gg1 / gg2
+```
+
+# Figure for publication
+
+Comparing unweighted and weighted UniFrac with Bray-Curtis.
+
+```{r}
+#| column: page
+#| fig-width: 10
+#| fig-height: 4
+#| message: false
+#| warning: false
+
+# unweighted UniFrac
+gg_uUF1 <- ggplot(datDist_intra, aes(x = uniFrac_unweighted)) + geom_histogram() + xlim(c(0,1)) + ggtitle("Unweighted UniFrac", "Intra-personal") +
+  theme(panel.grid.minor = element_blank(),
+        axis.title.x     = element_blank(),
+        axis.text.x      = element_blank())
+gg_uUF2 <- ggplot(datDist_inter, aes(x = uniFrac_unweighted)) + geom_histogram() + xlim(c(0,1)) + ggtitle("", "Inter-personal") + xlab("distance value") + theme(panel.grid.minor = element_blank())
+
+# weighted UniFrac
+gg_wUF1 <- ggplot(datDist_intra, aes(x = uniFrac_weighted)) + geom_histogram() + xlim(c(0,1)) + ggtitle("Weighted UniFrac", "Intra-personal") +
+  theme(panel.grid.minor = element_blank(),
+        axis.title       = element_blank(),
+        axis.text.x      = element_blank())
+gg_wUF2 <- ggplot(datDist_inter, aes(x = uniFrac_weighted)) + geom_histogram() + xlim(c(0,1)) + ggtitle("", "Inter-personal") + xlab("distance value") +
+  theme(panel.grid.minor = element_blank(),
+        axis.title.y     = element_blank())
+
+# Bray-Curtis
+gg_bc1 <- ggplot(datDist_intra, aes(x = brayCurtis)) + geom_histogram() + xlim(c(0,1)) + ggtitle("Bray-Curtis", "Intra-personal") +
+  theme(panel.grid.minor = element_blank(),
+        axis.title       = element_blank(),
+        axis.text.x      = element_blank())
+gg_bc2 <- ggplot(datDist_inter, aes(x = brayCurtis)) + geom_histogram() + xlim(c(0,1)) + ggtitle("", "Inter-personal") + xlab("dissimilarity value") +
+  theme(panel.grid.minor = element_blank(),
+        axis.title.y     = element_blank())
+
+layout <- "
+ABC
+DEF
+"
+gg_uUF1 + gg_wUF1 + gg_bc1 + gg_uUF2 + gg_wUF2 + gg_bc2 + patchwork::plot_layout(design = layout)
+# ggsave("FigureS4_InterIntraBetaDiversity.png", width = 10, height = 4)
+```
+
+
+# Intra-personal variation
+
+1. For each timepoint comparison (e.g. *T1 vs. T3*) one Bray-Curtis dissimilarity was
+calculated per person
+2. The following boxplots all depict such comparisons where one timepoint
+measurement of a person was compared to another timepoint measurement of the same
+person. Accordingly, each point encodes **intra-personal variation**.
+3. The displayed dissimilarities vary between 0 (*perfect similarity*)
+and 1 (*no similarity at all*).
+
+
+## Development over the timepoints
+
+```{r}
+datDist_intra %>% 
+  filter(comparison %in% c("T1 vs. T2", "T2 vs. T3", "T3 vs. T4", "T4 vs. T5")) %>% 
+  ggplot(aes(x = comparison, y = brayCurtis)) +
+  geom_boxplot() +
+  geom_line(aes(group = participant_id, col = participant_id), alpha = 0.3) +
+  facet_wrap(~ group) +
+  theme(axis.title.x    = element_blank(),
+        legend.position = "none")
+```
+
+
+## Variation by intervention
+
+```{r}
+#| message: false
+
+datDist_intra %>% 
+  filter(comparison_group != "other") %>% 
+  ggplot(aes(x = comparison, y = brayCurtis)) +
+  geom_boxplot() +
+  geom_line(aes(group = participant_id, col = participant_id), alpha = 0.3) +
+  facet_wrap(~ comparison_group, scales = "free_x") +
+  theme(axis.title.x    = element_blank(),
+        legend.position = "none")
+```
+
+### Figure for publication
+
+```{r}
+#| column: page
+#| fig-width: 13
+#| fig-height: 5
+
+dat_plot <- datDist_intra %>% 
+  filter(comparison_group != "other",
+         comparison != "T1 vs. T5") %>% 
+  mutate(comparison_group = case_when(comparison_group == "baselines" & comparison == "T1 vs. T3" ~ "Baseline variation\n(1st vs. 2nd baseline)",
+                                      comparison_group == "baselines" & comparison == "T3 vs. T5" ~ "Follow-up variation\n(follow-up vs. 2nd baseline)",
+                                      comparison_group == "fresh intervention"                    ~ "Fresh intervention\n(vs. baseline)",
+                                      comparison_group == "pasteurized intervention"              ~ "Pasteurized intervention\n(vs. baseline)"),
+         comparison_group = factor(comparison_group,
+                                   levels = c("Baseline variation\n(1st vs. 2nd baseline)", "Fresh intervention\n(vs. baseline)",
+                                              "Pasteurized intervention\n(vs. baseline)", "Follow-up variation\n(follow-up vs. 2nd baseline)")))
+
+# weighted UniFrac
+gg_betaDiv_wUF <- dat_plot %>% 
+  ggplot(aes(x = comparison_group, y = uniFrac_weighted, col = comparison_group)) +
+  geom_boxplot() +
+  scale_y_continuous("weighted UniFrac distance", limits = c(0, .5)) +
+  scale_color_manual(values = c("gray20","#1F78B4","#FF7F00","gray20")) +
+  ggtitle("Beta-diversity (weighted UniFrac)", "(baseline and intervention)") +
+  theme(axis.title.x    = element_blank(),
+        legend.position = "none",
+        panel.grid.minor   = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.major.y = element_line(color = "gray95"))
+
+# Bray-Curtis
+gg_betaDiv_bc <- dat_plot %>% 
+  ggplot(aes(x = comparison_group, y = brayCurtis, col = comparison_group)) +
+  geom_boxplot() +
+  scale_y_continuous("Bray-Curtis dissimilarity", limits = c(0, .8)) +
+  scale_color_manual(values = c("gray20","#1F78B4","#FF7F00","gray20")) +
+  ggtitle("Beta-diversity (Bray-Curtis)", "(baseline and intervention)") +
+  theme(axis.title.x    = element_blank(),
+        legend.position = "none",
+        panel.grid.minor   = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.major.y = element_line(color = "gray95"))
+
+gg_betaDiv_wUF + gg_betaDiv_bc
+# ggsave("FigureS6_betaDiversity.png", width = 13, height = 5)
+```
+
+
+### Same figure, just with unweighted UniFrac instead of Bray-Curtis
+
+```{r}
+gg_betaDiv_uuf <- datDist_intra %>% 
+  filter(comparison_group != "other",
+         comparison != "T1 vs. T5") %>% 
+  mutate(comparison_group = case_when(comparison_group == "baselines" & comparison == "T1 vs. T3" ~ "Baseline variation\n(1st vs. 2nd baseline)",
+                                      comparison_group == "baselines" & comparison == "T3 vs. T5" ~ "Follow-up variation\n(follow-up vs. 2nd baseline)",
+                                      comparison_group == "fresh intervention"                    ~ "Fresh intervention\n(vs. baseline)",
+                                      comparison_group == "pasteurized intervention"              ~ "Pasteurized intervention\n(vs. baseline)"),
+         comparison_group = factor(comparison_group,
+                                   levels = c("Baseline variation\n(1st vs. 2nd baseline)", "Fresh intervention\n(vs. baseline)",
+                                              "Pasteurized intervention\n(vs. baseline)", "Follow-up variation\n(follow-up vs. 2nd baseline)"))) %>% 
+  ggplot(aes(x = comparison_group, y = uniFrac_unweighted, col = comparison_group)) +
+  geom_boxplot() +
+  scale_y_continuous("unweighted UniFrac distance", limits = c(0, .8)) +
+  scale_color_manual(values = c("gray20","#1F78B4","#FF7F00","gray20")) +
+  ggtitle("Beta diversity", "(baseline and intervention)") +
+  theme(axis.title.x    = element_blank(),
+        legend.position = "none",
+        panel.grid.minor   = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.major.y = element_line(color = "gray95"))
+gg_betaDiv_uuf
+# ggsave("betaDiversity_unweightedUniFrac.png", width = 6.8, height = 5)
+```
+
+
+## Variation vs. microbiome diversity
+
+Based on the intra-personal Bray-Curtis dissimilarities between the *T1 vs. T2*
+and the *T3 vs. T4* measurements, the following plots visualize the assocation
+between these dissimilarities and the people's microbiota diversity at the respective
+baseline (T1 or T3).\
+Shannon diversity and inverse Simpson diversity are used as microbiota diversity measures.
+
+**Hypothesis:** The higher the microbiota diversity of the baseline, the more
+stable the microbiota.
+
+```{r add diversity measures to data}
+datDist_intra <- datDist_intra %>% 
+  mutate(part_time = paste0(participant_id, "_", timepoint_1)) %>% 
+  dplyr::left_join(dat %>% select(part_time, age_cat, bmi_cat, intervention, diversity_shannon, diversity_invSimpson), by = "part_time") %>% 
+  select(-part_time)
+```
+
+
+```{r}
+#| message: false
+
+# Shannon diversity
+datDist_intra %>% 
+  filter(comparison %in% c("T1 vs. T2", "T3 vs. T4")) %>% 
+  ggplot(aes(x = diversity_shannon, y = brayCurtis)) +
+  geom_point() +
+  geom_smooth(se = FALSE, col = "dodgerblue3") +
+  facet_grid(rows = vars(intervention), cols = vars(comparison)) +
+  ggtitle("Bray-Curtis vs. baseline Shannon diversity")
+
+# inverse Simpson diversity
+datDist_intra %>% 
+  filter(comparison %in% c("T1 vs. T2", "T3 vs. T4")) %>% 
+  ggplot(aes(x = diversity_invSimpson, y = brayCurtis)) +
+  geom_point() +
+  geom_smooth(se = FALSE, col = "dodgerblue3") +
+  facet_grid(rows = vars(intervention), cols = vars(comparison)) +
+  ggtitle("Bray-Curtis vs. baseline inv. Simpson diversity")
+```
+
+
+### Figure for publication
+
+```{r}
+# plot with categorized alpha diversity
+divShannon_tertiles <- quantile(dat$diversity_shannon, probs = c(0, 1/3, 2/3, 1))
+tertiles_rounded    <- divShannon_tertiles %>% round(2) %>% unname()
+tertile_labels      <- c(paste0("low tertile\n(", tertiles_rounded[1],"-",tertiles_rounded[2],")"),
+                         paste0("mid tertile\n(", tertiles_rounded[2],"-",tertiles_rounded[3],")"),
+                         paste0("high tertile\n(",tertiles_rounded[3],"-",tertiles_rounded[4],")"))
+gg_betaVSalpha_cat <- datDist_intra %>% 
+  filter(comparison_group %in% c("fresh intervention", "pasteurized intervention")) %>% 
+  mutate(diversity_shannon_cat = case_when(diversity_shannon < divShannon_tertiles[2] ~ tertile_labels[1],
+                                           diversity_shannon < divShannon_tertiles[3] ~ tertile_labels[2],
+                                           TRUE ~ tertile_labels[3]),
+         diversity_shannon_cat = factor(diversity_shannon_cat, levels = tertile_labels),
+         comparison_group      = case_when(comparison_group == "fresh intervention" ~ "Fresh intervention\n(intervention vs. baseline)",
+                                           comparison_group == "pasteurized intervention" ~ "Pasteurized intervention\n(intervention vs. baseline)")) %>% 
+  ggplot(aes(x = diversity_shannon_cat, y = brayCurtis, col = comparison_group)) +
+  geom_boxplot() +
+  scale_color_manual(values = c("#1F78B4","#FF7F00")) +
+  facet_wrap(~ comparison_group) +
+  ggtitle("Beta diversity by alpha diversity") +
+  xlab("Baseline alpha diversity (Shannon)") +
+  scale_y_continuous("Bray-Curtis dissimilarity", limits = c(0, .8)) +
+  theme(legend.position    = "none",
+        panel.grid.minor   = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.major.y = element_line(color = "gray95"))
+gg_betaVSalpha_cat
+# ggsave("betaDivByAlphaDiv_brayCurtis_cat.png", width = 6.8, height = 5)
+```
+
+```{r}
+#| message: false
+
+# plot with metric alpha diversity
+dat_comparison2 <- datDist_intra %>% 
+  filter(comparison_group %in% c("fresh intervention", "pasteurized intervention"))
+
+gg_betaVSalpha <- dat_comparison2 %>% 
+  mutate(comparison_group = case_when(comparison_group == "fresh intervention" ~ "Fresh intervention\n(intervention vs. baseline)",
+                                      comparison_group == "pasteurized intervention" ~ "Pasteurized intervention\n(intervention vs. baseline)")) %>% 
+  ggplot(aes(x = diversity_shannon, y = brayCurtis, col = comparison_group)) +
+  geom_point() +
+  scale_color_manual(values = c("#1F78B4","#FF7F00")) +
+  geom_smooth(se = FALSE, method = "lm") +
+  facet_wrap(~ comparison_group) +
+  ggtitle("Beta diversity by alpha diversity") +
+  xlab("Baseline alpha diversity (Shannon)") +
+  scale_y_continuous("Bray-Curtis dissimilarity", limits = c(0, .8)) +
+  theme(legend.position    = "none",
+        panel.grid.minor   = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.major.y = element_line(color = "gray95"))
+gg_betaVSalpha
+# ggsave("betaDivByAlphaDiv_brayCurtis.png", width = 6.8, height = 5)
+
+# correlation test in each comparison group
+corrTest_fresh <- cor.test(x = dat_comparison2$diversity_shannon[dat_comparison2$comparison_group == "fresh intervention"],
+                           y = dat_comparison2$brayCurtis[dat_comparison2$comparison_group == "fresh intervention"])
+corrTest_past  <- cor.test(x = dat_comparison2$diversity_shannon[dat_comparison2$comparison_group == "pasteurized intervention"],
+                           y = dat_comparison2$brayCurtis[dat_comparison2$comparison_group == "pasteurized intervention"])
+```
+
+Correlation between beta and baseline alpha diversity in the fresh intervention group: `r corrTest_fresh$estimate %>% round(2) %>% unname` (p = `r corrTest_fresh$p.value %>% round(4)`)  
+Correlation between beta and baseline alpha diversity in the pasteurized intervention group: `r corrTest_past$estimate %>% round(2) %>% unname` (p = `r corrTest_past$p.value %>% round(4)`)
+
+
+### Same figure, just with unweighted UniFrac instead of Bray-Curtis
+
+```{r}
+#| message: false
+
+# plot with metric alpha diversity
+gg_betaVSalpha_uuf <- dat_comparison2 %>% 
+  mutate(comparison_group = case_when(comparison_group == "fresh intervention" ~ "Fresh intervention\n(intervention vs. baseline)",
+                                      comparison_group == "pasteurized intervention" ~ "Pasteurized intervention\n(intervention vs. baseline)")) %>% 
+  ggplot(aes(x = diversity_shannon, y = uniFrac_unweighted, col = comparison_group)) +
+  geom_point() +
+  scale_color_manual(values = c("#1F78B4","#FF7F00")) +
+  geom_smooth(se = FALSE, method = "lm") +
+  facet_wrap(~ comparison_group) +
+  ggtitle("Beta diversity by alpha diversity") +
+  xlab("Baseline alpha diversity (Shannon)") +
+  scale_y_continuous("unweighted UniFrac distance", limits = c(0, .8)) +
+  theme(legend.position    = "none",
+        panel.grid.minor   = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.major.y = element_line(color = "gray95"))
+gg_betaVSalpha_uuf
+# ggsave("betaDivByAlphaDiv_unweightedUniFrac.png", width = 6.8, height = 5)
+
+# correlation test in each comparison group
+corrTest_fresh_uuf <- cor.test(x = dat_comparison2$diversity_shannon[dat_comparison2$comparison_group == "fresh intervention"],
+                               y = dat_comparison2$uniFrac_unweighted[dat_comparison2$comparison_group == "fresh intervention"])
+corrTest_past_uuf  <- cor.test(x = dat_comparison2$diversity_shannon[dat_comparison2$comparison_group == "pasteurized intervention"],
+                               y = dat_comparison2$uniFrac_unweighted[dat_comparison2$comparison_group == "pasteurized intervention"])
+```
+
+Correlation between beta and baseline alpha diversity in the fresh intervention group: `r corrTest_fresh_uuf$estimate %>% round(2) %>% unname` (p = `r corrTest_fresh_uuf$p.value %>% round(4)`)  
+Correlation between beta and baseline alpha diversity in the pasteurized intervention group: `r corrTest_past_uuf$estimate %>% round(2) %>% unname` (p = `r corrTest_past_uuf$p.value %>% round(4)`)
+
+# Inter-personal variation
+
+```{r}
+datDist_inter %>% 
+  filter(timepoint_group == "baselines") %>% 
+  ggplot(aes(x = timepoint, y = brayCurtis)) +
+  geom_boxplot() +
+  ylim(c(0,1)) +
+  theme(axis.title.x = element_blank())
+```
+
+
+# Intra-personal comparison of Bray-Curtis with UniFrac
+
+```{r}
+#| message: false
+
+ggplot(datDist_intra, aes(x = brayCurtis, y = uniFrac_weighted)) +
+  geom_point(col = "lightgray") +
+  geom_smooth(se = FALSE) +
+  ggtitle("weighted UniFrac vs. Bray-Curtis")
+
+ggplot(datDist_intra, aes(x = brayCurtis, y = uniFrac_unweighted)) +
+  geom_point(col = "lightgray") +
+  geom_smooth(se = FALSE) +
+  ggtitle("unweighted UniFrac vs. Bray-Curtis")
+
+ggplot(datDist_intra, aes(x = brayCurtis, y = uniFrac_unweighted)) +
+  geom_point(col = "lightgray") +
+  scale_y_continuous(trans = "log2") +
+  geom_smooth(se = FALSE) +
+  ggtitle("logarithmized unweighted UniFrac vs. Bray-Curtis")
+```
+
+
+
+# Intra-personal comparison of Bray-Curtis with UMAP distances
+
+```{r helper function for calculating UMAP distances}
+# put the data preparation in a function, s.t. it's easily applicable also to subgroups in dat_UMAP
+create_changeDat <- function(dat_UMAP) {
+  # create the location dataset
+  dat_change <- dat_UMAP %>% 
+    dplyr::rename(x = UMAP1,
+                  y = UMAP2) %>% 
+    select(participant_id, intervention, timepoint, x, y) %>% 
+    pivot_wider(id_cols = participant_id, names_from = timepoint, values_from = c("x", "y")) %>% 
+    arrange(participant_id)
+  
+  # add the directional change variables
+  dat_change <- dat_change %>% 
+    mutate(xChange_T1toT2           = x_T2 - x_T1,
+           yChange_T1toT2           = y_T2 - y_T1,
+           totalAbsChange_T1toT2    = abs(xChange_T1toT2) + abs(yChange_T1toT2),
+           totalAvgAbsChange_T1toT2 = totalAbsChange_T1toT2 / 2,
+           xChange_T2toT3           = x_T3 - x_T2,
+           yChange_T2toT3           = y_T3 - y_T2,
+           totalAbsChange_T2toT3    = abs(xChange_T2toT3) + abs(yChange_T2toT3),
+           totalAvgAbsChange_T2toT3 = totalAbsChange_T2toT3 / 2,
+           xChange_T3toT4           = x_T4 - x_T3,
+           yChange_T3toT4           = y_T4 - y_T3,
+           totalAbsChange_T3toT4    = abs(xChange_T3toT4) + abs(yChange_T3toT4),
+           totalAvgAbsChange_T3toT4 = totalAbsChange_T3toT4 / 2)
+  
+  if ("x_T5" %in% colnames(dat_change)) {
+    dat_change <- dat_change %>% 
+      mutate(xChange_T4toT5           = x_T5 - x_T4,
+             yChange_T4toT5           = y_T5 - y_T4,
+             totalAbsChange_T4toT5    = abs(xChange_T4toT5) + abs(yChange_T4toT5),
+             totalAvgAbsChange_T4toT5 = totalAbsChange_T4toT5 / 2)
+  } else {
+    dat_change <- dat_change %>% 
+      mutate(xChange_T4toT5           = NA,
+             yChange_T4toT5           = NA,
+             totalAbsChange_T4toT5    = NA,
+             totalAvgAbsChange_T4toT5 = NA)
+  }
+  
+  # add the overall change variable
+  dat_change <- dat_change %>% 
+    mutate(n_observedChanges       = as.numeric(!is.na(totalAbsChange_T1toT2)) + as.numeric(!is.na(totalAbsChange_T2toT3)) +
+             as.numeric(!is.na(totalAbsChange_T3toT4)) + as.numeric(!is.na(totalAbsChange_T4toT5))) %>% 
+    rowwise() %>% 
+    mutate(totalAbsChange_total    = sum(c(totalAbsChange_T1toT2, totalAbsChange_T2toT3, totalAbsChange_T3toT4, totalAbsChange_T4toT5), na.rm = TRUE),
+           totalAvgAbsChange_total = totalAbsChange_total / (2*n_observedChanges),
+           xAbsChange_total        = sum(abs(c(xChange_T1toT2, xChange_T2toT3, xChange_T3toT4, xChange_T4toT5)), na.rm = TRUE),
+           xAvgAbsChange_total     = xAbsChange_total / n_observedChanges,
+           yAbsChange_total        = sum(abs(c(yChange_T1toT2, yChange_T2toT3, yChange_T3toT4, yChange_T4toT5)), na.rm = TRUE),
+           yAvgAbsChange_total     = yAbsChange_total / n_observedChanges)
+  
+  # add a avgAbsBaselineChange variable, containing the average pairwise change between T1, T3, T5, averaged over x and y
+  dat_change <- dat_change %>% 
+    rowwise() %>% 
+    mutate(xChange_T1toT3 = x_T3 - x_T1,
+           xChange_T1toT5 = x_T5 - x_T1,
+           xChange_T3toT5 = x_T5 - x_T3,
+           yChange_T1toT3 = y_T3 - y_T1,
+           yChange_T1toT5 = y_T5 - y_T1,
+           yChange_T3toT5 = y_T5 - y_T3,
+           avgAbsBaselineChange = sum(abs(c(xChange_T1toT3, xChange_T1toT5, xChange_T3toT5,
+                                            yChange_T1toT3, yChange_T1toT5, yChange_T3toT5)), na.rm = TRUE) / 6,
+           avgAbsBaselineChange_T1toT3 = sum(abs(c(xChange_T1toT3, yChange_T1toT3)), na.rm = TRUE) / 2,
+           avgAbsBaselineChange_T1toT5 = sum(abs(c(xChange_T1toT5, yChange_T1toT5)), na.rm = TRUE) / 2,
+           avgAbsBaselineChange_T3toT5 = sum(abs(c(xChange_T3toT5, yChange_T3toT5)), na.rm = TRUE) / 2)
+  
+  dat_change
+}
+```
+
+```{r calculate UMAP distances}
+dat_change <- create_changeDat(dat_UMAP)
+```
+
+Note: The comparison doesn't include all pairwise intra-personal timepoint comparisons,
+simply to save some time, since not all of these comparisons were already calculated in the existing codebase.
+
+```{r}
+#| column: page
+#| fig-width: 12
+#| fig-height: 6
+
+# prepare the UMAP distance data
+datDist_UMAP <- dat_change %>% 
+  select(participant_id, contains("toT")) %>% 
+  select(-starts_with("x"), -starts_with("y"), -starts_with("totalAbsC"), -contains("_total")) %>% 
+  pivot_longer(cols = contains("toT"), names_to = "comparison", values_to = "UMAP_distance") %>% 
+  mutate(comparison = sapply(comparison, function(x) { strsplit(x, split = "\\_")[[1]][2] }),
+         comparison = gsub(comparison, pattern = "to", replacement = " vs. "))
+
+# join the Bray-Curtis and the UMAP distance data
+dat_comparison <- datDist_intra %>% 
+  dplyr::left_join(datDist_UMAP, by = c("participant_id", "comparison")) %>% 
+  filter(!is.na(UMAP_distance))
+
+# plot the differences
+ggplot(dat_comparison, aes(x = brayCurtis, y = UMAP_distance, color = comparison)) +
+  geom_point() +
+  facet_wrap(~ comparison) +
+  ggtitle("UMAP distances vs. Bray-Curtis distances") +
+  theme(legend.position = "none")
+
+ggplot(dat_comparison, aes(x = brayCurtis, y = log(UMAP_distance), color = comparison)) +
+  geom_point() +
+  facet_wrap(~ comparison) +
+  ggtitle("logarithmized UMAP distances vs. Bray-Curtis distances") +
+  theme(legend.position = "none")
+
+cor_UMAP_BC <- cor(dat_comparison$UMAP_distance, dat_comparison$brayCurtis, method = "spearman")
+```
+
+Spearman correlation between the UMAP distances and the Bray-Curtis distances: `r round(cor_UMAP_BC, 2)`
+
+
+## UMAP distance vs. baseline alpha diversity
+
+```{r}
+#| message: false
+
+# plot with metric alpha diversity
+dat_comparison <- data.frame(participant_id   = rep(dat_change$participant_id, times = 2),
+                             comparison       = rep(c("T1 vs. T2", "T3 vs. T4"), each = nrow(dat_change)),
+                             UMAP_distance    = c(dat_change$totalAvgAbsChange_T1toT2, dat_change$totalAvgAbsChange_T3toT4)) %>% 
+  dplyr::left_join(dat %>% filter(timepoint == "T1") %>% select(participant_id, diversity_shannon, group), by = "participant_id") %>% 
+  mutate(comparison_group = case_when((comparison == "T1 vs. T2") & (group == "Fresh first") ~ "fresh intervention",
+                                      comparison == "T1 vs. T2"                              ~ "pasteurized intervention",
+                                      group == "Fresh first"                                 ~ "pasteurized intervention",
+                                      TRUE                                                   ~ "fresh intervention")) %>% 
+  filter(!is.na(UMAP_distance))
+
+dat_comparison %>% 
+  mutate(comparison_group = case_when(comparison_group == "fresh intervention" ~ "Fresh intervention\n(intervention vs. baseline)",
+                                      comparison_group == "pasteurized intervention" ~ "Pasteurized intervention\n(intervention vs. baseline)")) %>% 
+  ggplot(aes(x = diversity_shannon, y = UMAP_distance, col = comparison_group)) +
+  geom_point() +
+  scale_color_manual(values = c("#1F78B4","#FF7F00")) +
+  geom_smooth(se = FALSE, span = 1) +
+  facet_wrap(~ comparison_group) +
+  ggtitle("Beta diversity by alpha diversity") +
+  xlab("Baseline alpha diversity (Shannon)") +
+  scale_y_continuous("average absolute UMAP distance") +
+  theme(legend.position    = "none",
+        panel.grid.minor   = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.major.y = element_line(color = "gray95"))
+# ggsave("betaDivByAlphaDiv_UMAP.png", width = 6.8, height = 5)
+
+# correlation test in each comparison group (based on GAMs, as of the nonlinearities)
+m_fresh <- gam(UMAP_distance ~ s(diversity_shannon, bs = "ps"), data = dat_comparison %>% filter(comparison_group == "fresh intervention"))
+# summary(m_fresh)
+m_past  <- gam(UMAP_distance ~ s(diversity_shannon, bs = "ps"), data = dat_comparison %>% filter(comparison_group == "pasteurized intervention"))
+```
+
+Association between beta and baseline alpha diversity in the fresh intervention group (tested based on a GAM model, as of the nonlinearities): `r summary(m_fresh)$s.table[,"p-value"] %>% round(4)`)  
+Association between beta and baseline alpha diversity in the pasteurized intervention group (tested based on a GAM model, as of the nonlinearities): `r summary(m_past)$s.table[,"p-value"] %>% round(4)`)  
+
+
+
+
+# Intra-personal model estimation on Bray-Curtis
+
+For the model, only look at the comparisons 'T1 vs. T3' (baseline), 'T1 vs. T2' (intervention 1)
+and 'T3 vs. T4' (intervention 2).
+
+```{r}
+# data preparation
+dat_model <- datDist_intra %>% 
+  filter(comparison %in% c("T1 vs. T3", "T1 vs. T2", "T3 vs. T4")) %>% 
+  dplyr::left_join(dat %>% select(participant_id, timepoint, dominant_species),
+                   by = c("participant_id" = "participant_id",
+                          "timepoint_1" = "timepoint")) %>% 
+  select(-intervention) %>% 
+  dplyr::rename(intervention = comparison_group)
+
+# model estimation
+m <- gam(brayCurtis ~ intervention + gender + age + bmi_t0 + diversity_shannon, # + s(participant_id, bs = "re"),
+         data = dat_model)
+
+# model results
+summary(m)
+APCtools::plot_linearEffects(m)
+```
+
+
+# Joint figures for publication
+
+## Supplements: UMAP and Bray-Curtis
+
+```{r}
+#| column: page
+#| fig-width: 22
+#| fig-height: 6
+#| warning: false
+#| message: false
+
+# 1) UMAP
+plot_dimRed_list <- plot_dimReduction(tse                = tse,
+                                      dimReduction_name  = "UMAP",
+                                      assay              = "relAbd",
+                                      taxRank_dominance  = "phylum",
+                                      taxRank_topNfocus  = 12)
+gg1 <- plot_dimRed_list$gg_interventionTimes_v2 +
+  labs(title = "UMAP of stool microbiota", subtitle = "colored by intervention",
+       tag = "(A)") +
+  xlab("Dimension 1") +
+  guides(color = guide_legend(nrow = 2)) +
+  theme_minimal(base_size = 16) +
+  theme(plot.title        = element_text(hjust = 0.5, margin = margin(t = 2, b = 3)),
+        plot.tag.location = "plot",
+        plot.tag          = element_text(size = 25, margin = margin(t = -5)),
+        plot.subtitle     = element_text(hjust = 0.5),
+        plot.background   = element_rect(fill = "white", color = "white"),
+        panel.grid.major  = element_line(color = "gray95"),
+        panel.grid.minor  = element_blank(),
+        legend.position   = "bottom",
+        axis.title.x      = element_text(margin = margin(t = 10)),
+        legend.margin     = margin(t = 0, l = 2))
+gg1_legend <- ggpubr::get_legend(gg1) %>% ggpubr::as_ggplot()
+gg1        <- gg1 + theme(legend.position = "none")
+
+# 2) Bray-Curtis beta diversity boxplots
+gg2 <- gg_betaDiv_bc +
+  labs(title = "Beta diversity", subtitle = "", tag = "(B)") +
+  ggtitle("Beta diversity", "") +
+  xlab("Comparison") +
+  theme_minimal(base_size = 16) +
+  theme(plot.title         = element_text(hjust = 0.5, margin = margin(b = -20, t = -3.9)),
+        plot.tag.location  = "plot",
+        plot.tag           = element_text(size = 25, margin = margin(t = -10.5)),
+        panel.grid.minor   = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.major.y = element_line(color = "gray95"),
+        axis.title.x       = element_text(margin = margin(t = 10)),
+        legend.position    = "none")
+
+
+# 3) Scatterplots Bray-Curtis beta diversity vs. baseline alpha diversity
+gg3 <- gg_betaVSalpha +
+  labs(tag = "(C)") +
+  theme_minimal(base_size = 16) +
+  theme(plot.title         = element_text(hjust = 0.5, margin = margin(b = -18.5)),
+        plot.tag.location  = "plot",
+        plot.tag           = element_text(size = 25, margin = margin(t = -10.5)),
+        panel.grid.minor   = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.major.y = element_line(color = "gray95"),
+        axis.title.x       = element_text(margin = margin(t = 10)),
+        legend.position    = "none")
+
+
+# create joint plot
+ggpubr::ggarrange(gg1, gg1_legend, nrow = 2, heights = c(.8, .2)) %>% 
+  ggpubr::ggarrange((gg2 + gg3), nrow = 1, widths = c(.2,.8)) +
+  theme(plot.background  = element_rect(fill = "white", color = "white"))
+# ggsave("FigureS3_betaDiversity_brayCurtis.png", width = 22, height = 6)
+```
+
+
+## Main paper: Same figure with unweighted UniFrac instead of Bray-Curtis
+
+```{r}
+#| column: page
+#| fig-width: 13
+#| fig-height: 10
+#| warning: false
+#| message: false
+
+# 1) UMAP
+# the 'gg1' object is already created in the code chunk above
+
+# 2) Bray-Curtis beta diversity boxplots
+gg2 <- gg_betaDiv_uuf +
+  labs(title = "Beta diversity", subtitle = "", tag = "(B)") +
+  ggtitle("Beta diversity", "") +
+  # xlab("Comparison") +
+  theme_minimal(base_size = 16) +
+  theme(plot.title         = element_text(hjust = 0.5, margin = margin(b = -20)),
+        plot.tag.location  = "plot",
+        plot.tag           = element_text(size = 25, margin = margin(t = -5)),
+        panel.grid.minor   = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.major.y = element_line(color = "gray95"),
+        axis.title.x       = element_blank(),
+        # axis.title.x       = element_text(margin = margin(t = 10)),
+        legend.position    = "none")
+
+
+# 3) Scatterplots Bray-Curtis beta diversity vs. baseline alpha diversity
+gg3 <- gg_betaVSalpha_uuf +
+  labs(tag = "(C)") +
+  theme_minimal(base_size = 16) +
+  theme(plot.title         = element_text(hjust = 0.5),
+        plot.tag.location  = "plot",
+        plot.tag           = element_text(size = 25, margin = margin(t = -5)),
+        panel.grid.minor   = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.major.y = element_line(color = "gray95"),
+        axis.title.x       = element_text(margin = margin(t = 10)),
+        legend.position    = "none")
+
+
+# create joint plot
+# ggpubr::ggarrange(gg1, gg1_legend, nrow = 2, heights = c(.8, .2)) %>% 
+#   ggpubr::ggarrange((gg2 + gg3), nrow = 1, widths = c(.2,.8)) +
+#   theme(plot.background  = element_rect(fill = "white", color = "white"))
+ggpubr::ggarrange(
+  ggpubr::ggarrange(gg1, gg1_legend, nrow = 2, heights = c(.8, .2)) %>% 
+    ggpubr::ggarrange(gg2, nrow = 1, widths = c(.35,.65)),
+  ggpubr::ggarrange(ggplot(), gg3, ggplot(), nrow = 1, widths = c(.2, .6, .2)),
+  nrow = 2
+) +
+  theme(plot.background  = element_rect(fill = "white", color = "white"))
+# ggsave("Figure3_betaDiversity_unweightedUniFrac.png", width = 13, height = 10)
+```
+
+
+# Stratified analysis by age, gender, BMI
+
+```{r}
+#| column: page
+#| fig-width: 12
+
+# by age
+datDist_intra %>% 
+  filter(comparison_group != "other",
+         comparison != "T1 vs. T5") %>% 
+  mutate(comparison_group = case_when(comparison_group == "baselines" & comparison == "T1 vs. T3" ~ "Baseline variation\n(1st vs. 2nd baseline)",
+                                      comparison_group == "baselines" & comparison == "T3 vs. T5" ~ "Follow-up variation\n(follow-up vs. 2nd baseline)",
+                                      comparison_group == "fresh intervention"                    ~ "Fresh intervention\n(vs. baseline)",
+                                      comparison_group == "pasteurized intervention"              ~ "Pasteurized intervention\n(vs. baseline)"),
+         comparison_group = factor(comparison_group,
+                                   levels = c("Baseline variation\n(1st vs. 2nd baseline)", "Fresh intervention\n(vs. baseline)",
+                                              "Pasteurized intervention\n(vs. baseline)", "Follow-up variation\n(follow-up vs. 2nd baseline)"))) %>% 
+  ggplot(aes(x = comparison_group, y = brayCurtis, col = comparison_group)) +
+  geom_boxplot() +
+  scale_y_continuous("Bray-Curtis dissimilarity", limits = c(0, .8)) +
+  scale_color_manual(values = c("gray20","#1F78B4","#FF7F00","gray20")) +
+  facet_wrap(~ age_cat) +
+  ggtitle("Beta diversity", "(baseline and intervention)") +
+  theme(axis.title.x    = element_blank(),
+        legend.position = "none",
+        panel.grid.minor   = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.major.y = element_line(color = "gray95"))
+
+
+# by gender
+datDist_intra %>% 
+  filter(comparison_group != "other",
+         comparison != "T1 vs. T5") %>% 
+  mutate(comparison_group = case_when(comparison_group == "baselines" & comparison == "T1 vs. T3" ~ "Baseline variation\n(1st vs. 2nd baseline)",
+                                      comparison_group == "baselines" & comparison == "T3 vs. T5" ~ "Follow-up variation\n(follow-up vs. 2nd baseline)",
+                                      comparison_group == "fresh intervention"                    ~ "Fresh intervention\n(vs. baseline)",
+                                      comparison_group == "pasteurized intervention"              ~ "Pasteurized intervention\n(vs. baseline)"),
+         comparison_group = factor(comparison_group,
+                                   levels = c("Baseline variation\n(1st vs. 2nd baseline)", "Fresh intervention\n(vs. baseline)",
+                                              "Pasteurized intervention\n(vs. baseline)", "Follow-up variation\n(follow-up vs. 2nd baseline)"))) %>% 
+  ggplot(aes(x = comparison_group, y = brayCurtis, col = comparison_group)) +
+  geom_boxplot() +
+  scale_y_continuous("Bray-Curtis dissimilarity", limits = c(0, .8)) +
+  scale_color_manual(values = c("gray20","#1F78B4","#FF7F00","gray20")) +
+  facet_wrap(~ gender) +
+  ggtitle("Beta diversity", "(baseline and intervention)") +
+  theme(axis.title.x    = element_blank(),
+        legend.position = "none",
+        panel.grid.minor   = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.major.y = element_line(color = "gray95"))
+
+
+
+# by BMI
+datDist_intra %>% 
+  filter(comparison_group != "other",
+         comparison != "T1 vs. T5") %>% 
+  mutate(comparison_group = case_when(comparison_group == "baselines" & comparison == "T1 vs. T3" ~ "Baseline variation\n(1st vs. 2nd baseline)",
+                                      comparison_group == "baselines" & comparison == "T3 vs. T5" ~ "Follow-up variation\n(follow-up vs. 2nd baseline)",
+                                      comparison_group == "fresh intervention"                    ~ "Fresh intervention\n(vs. baseline)",
+                                      comparison_group == "pasteurized intervention"              ~ "Pasteurized intervention\n(vs. baseline)"),
+         comparison_group = factor(comparison_group,
+                                   levels = c("Baseline variation\n(1st vs. 2nd baseline)", "Fresh intervention\n(vs. baseline)",
+                                              "Pasteurized intervention\n(vs. baseline)", "Follow-up variation\n(follow-up vs. 2nd baseline)"))) %>% 
+  ggplot(aes(x = comparison_group, y = brayCurtis, col = comparison_group)) +
+  geom_boxplot() +
+  scale_y_continuous("Bray-Curtis dissimilarity", limits = c(0, .8)) +
+  scale_color_manual(values = c("gray20","#1F78B4","#FF7F00","gray20")) +
+  facet_wrap(~ bmi_cat) +
+  ggtitle("Beta diversity", "(baseline and intervention)") +
+  theme(axis.title.x    = element_blank(),
+        legend.position = "none",
+        panel.grid.minor   = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.major.y = element_line(color = "gray95"))
+```
+
+
+```{r}
+#| message: false
+
+# by age
+dat_comparison2 %>% 
+  mutate(comparison_group = case_when(comparison_group == "fresh intervention" ~ "Fresh intervention\n(intervention vs. baseline)",
+                                      comparison_group == "pasteurized intervention" ~ "Pasteurized intervention\n(intervention vs. baseline)")) %>% 
+  ggplot(aes(x = diversity_shannon, y = brayCurtis, col = comparison_group)) +
+  geom_point() +
+  scale_color_manual(values = c("#1F78B4","#FF7F00")) +
+  geom_smooth(se = FALSE, span = 1) +
+  facet_wrap(~ comparison_group + age_cat) +
+  ggtitle("Beta diversity by alpha diversity") +
+  xlab("Baseline alpha diversity (Shannon)") +
+  scale_y_continuous("Bray-Curtis dissimilarity", limits = c(0, .8)) +
+  theme(legend.position    = "none",
+        panel.grid.minor   = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.major.y = element_line(color = "gray95"))
+
+
+# by gender
+dat_comparison2 %>% 
+  mutate(comparison_group = case_when(comparison_group == "fresh intervention" ~ "Fresh intervention\n(intervention vs. baseline)",
+                                      comparison_group == "pasteurized intervention" ~ "Pasteurized intervention\n(intervention vs. baseline)")) %>% 
+  ggplot(aes(x = diversity_shannon, y = brayCurtis, col = comparison_group)) +
+  geom_point() +
+  scale_color_manual(values = c("#1F78B4","#FF7F00")) +
+  geom_smooth(se = FALSE, span = 1) +
+  facet_wrap(~ comparison_group + gender) +
+  ggtitle("Beta diversity by alpha diversity") +
+  xlab("Baseline alpha diversity (Shannon)") +
+  scale_y_continuous("Bray-Curtis dissimilarity", limits = c(0, .8)) +
+  theme(legend.position    = "none",
+        panel.grid.minor   = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.major.y = element_line(color = "gray95"))
+
+
+# by BMI
+dat_comparison2 %>% 
+  mutate(comparison_group = case_when(comparison_group == "fresh intervention" ~ "Fresh intervention\n(intervention vs. baseline)",
+                                      comparison_group == "pasteurized intervention" ~ "Pasteurized intervention\n(intervention vs. baseline)")) %>% 
+  ggplot(aes(x = diversity_shannon, y = brayCurtis, col = comparison_group)) +
+  geom_point() +
+  scale_color_manual(values = c("#1F78B4","#FF7F00")) +
+  geom_smooth(se = FALSE, span = 1) +
+  facet_wrap(~ comparison_group + bmi_cat) +
+  ggtitle("Beta diversity by alpha diversity") +
+  xlab("Baseline alpha diversity (Shannon)") +
+  scale_y_continuous("Bray-Curtis dissimilarity", limits = c(0, .8)) +
+  theme(legend.position    = "none",
+        panel.grid.minor   = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.major.y = element_line(color = "gray95"))
+```
+
+
+# PCoA of inter-personal distances
+
+Code source: https://microbiome.github.io/course_2021_radboud/beta-diversity.html
+
+```{r}
+# Pick the relative abundance table
+rel_abund_assay <- assays(tse)$relAbd
+
+# Calculates Bray-Curtis distances between samples. Because taxa is in
+# columns, it is used to compare different samples. We transpose the
+# assay to get taxa to columns
+bray_curtis_dist <- vegan::vegdist(t(rel_abund_assay), method = "bray")
+
+# PCoA
+bray_curtis_pcoa <- ecodist::pco(bray_curtis_dist)
+
+# All components could be found here: 
+# bray_curtis_pcoa$vectors
+# But we only need the first two to demonstrate what we can do:
+bray_curtis_pcoa_df <- data.frame(pcoa1 = bray_curtis_pcoa$vectors[,1], 
+                                  pcoa2 = bray_curtis_pcoa$vectors[,2])
+
+# Create a plot
+bray_curtis_pcoa_df %>% 
+  mutate(inter_treat = colData(tse)$inter_treat) %>% 
+  ggplot(data = ., aes(x = pcoa1, y = pcoa2, color = inter_treat)) +
+  geom_point() +
+  ggtitle("Bray Curtis-based PCoA") +
+  xlab("PC1") + ylab("PC2")
+```

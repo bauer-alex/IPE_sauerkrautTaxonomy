@@ -1,0 +1,501 @@
+---
+title: "Sauerkraut study - Descriptive Bloodmarker Analysis"
+format:
+  html:
+    toc: true
+    code-fold: true
+    embed-resources: true
+---
+
+```{r packages}
+#| warning: false
+
+library(sauerkrautTaxonomyBuddy)
+library(SummarizedExperiment) # microbiome analysis
+library(mia)                  # microbiome analysis
+
+library(dplyr)     # data handling
+library(tidyr)     # data transformation
+library(ggplot2)   # data visualization
+library(patchwork) # grid of ggplot2
+
+# set ggplot2 theme
+theme_set(
+  theme_minimal() +
+    theme(plot.title       = element_text(hjust = 0.5),
+          plot.subtitle    = element_text(hjust = 0.5),
+          panel.grid.minor = element_blank(),
+          plot.background  = element_rect(fill = "white", color = "white"))
+)
+```
+
+# Data preparation
+
+```{r set file paths}
+define_dataPaths()
+```
+
+```{r read data}
+#| warning: false
+
+tse <- readAndPrepare_mainTaxonomicData(path_groupInfoRdata               = path_groupInfoRdata,
+                                        path_participantRdata             = path_participantRdata,
+                                        path_samplesIDxlsx                = path_samplesIDxlsx,
+                                        path_dietInfoCsv                  = path_dietInfoCsv,
+                                        path_nutrientInfoCsv              = path_nutrientInfoCsv,
+                                        path_bloodMetabolomeXlsx          = path_bloodMetabolomeXlsx,
+                                        path_stoolMetabolomeXlsx          = path_stoolMetabolomeXlsx,
+                                        path_T4questXlsx                  = path_T4questXlsx,
+                                        path_stoolInfoXlsx                = path_stoolInfoXlsx,
+                                        path_bodyMeasuresXlsx             = path_bodyMeasuresXlsx,
+                                        path_absTaxonomyData              = path_absTaxonomyData,
+                                        path_relTaxonomyData              = path_relTaxonomyData,
+                                        path_sampleLookupXlsx             = path_sampleLookupXlsx,
+                                        path_krautLookupXlsx              = path_krautLookupXlsx,
+                                        path_bloodMarkerBostonRdata       = path_bloodMarkerBostonRdata,
+                                        path_bloodMarkerZentrallaborRdata = path_bloodMarkerZentrallaborRdata,
+                                        path_bloodMarkerBostonXlsx        = path_bloodMarkerBostonXlsx,
+                                        path_bloodMarkerZentrallaborXlsx  = path_bloodMarkerZentrallaborXlsx,
+                                        aggregation_level                 = "species",
+                                        exclude_sickParticipants          = "taxonomy paper")
+
+dat <- tse %>% 
+  colData() %>% 
+  as.data.frame()
+```
+
+```{r lookup vectors}
+metabolic_markers    <- c("Fructosamine" = "fructosamine",
+                          "Glucose"      = "glucose",
+                          "Insulin"      = "insulin")
+inflammation_markers <- c("IL-6"    = "il6",
+                          "hsCRP"   = "scrp",
+                          "sTNFR-2" = "tnfr2",
+                          "sRAGE"   = "rage")
+leakyGut_markers     <- c("LBP"     = "lbp",
+                          "FABP-2"  = "fabp2",
+                          "Zonulin" = "zonulin")
+SCFA_bloodMarkers    <- c("Acetic acid (Blood)"          = "blood_aceticAcid",
+                          "Propionic acid (Blood)"       = "blood_propionicAcid",
+                          "Butyric acid (Blood)"         = "blood_butyricAcid",
+                          "Valeric acid (Blood)"         = "blood_valericAcid",
+                          "Hexanoic acid (Blood)"        = "blood_hexanoicAcid")
+SCFA_stoolMarkers    <- c("Acetic acid (Stool)"          = "stool_aceticAcid",
+                          "Propionic acid (Stool)"       = "stool_propionicAcid",
+                          "Butyric acid (Stool)"         = "stool_butyricAcid",
+                          "Valeric acid (Stool)"         = "stool_valericAcid",
+                          "Hexanoic acid (Stool)"        = "stool_hexanoicAcid")
+BCFA_bloodMarkers    <- c("Iso-butyric acid (Blood)"     = "blood_isobutyricAcid",
+                          "Iso-valeric acid (Blood)"     = "blood_isovalericAcid",
+                          "2-Methylbutyric acid (Blood)" = "blood_methylbutyricAcid")
+BCFA_stoolMarkers    <- c("Iso-butyric acid (Stool)"     = "stool_isobutyricAcid",
+                          "Iso-valeric acid (Stool)"     = "stool_isovalericAcid",
+                          "2-Methylbutyric acid (Stool)" = "stool_methylbutyricAcid")
+
+marker_units         <- c("Glucose"                      = "mg/dl",
+                          "Fructosamine"                 = "µmol/l",
+                          "Insulin"                      = "pmol/l",
+                          "sTNFR-2"                      = "pg/ml",
+                          "IL-6"                         = "pg/ml",
+                          "hsCRP"                        = "mg/l",
+                          "sRAGE"                        = "pg/ml",
+                          "LBP"                          = "ng/ml",
+                          "FABP-2"                       = "pg/ml",
+                          "Zonulin"                      = "ng/ml",
+                          "2-Methylbutyric acid (Blood)" = "ng/ml",
+                          "Acetic acid (Blood)"          = "ng/ml",
+                          "Butyric acid (Blood)"         = "ng/ml",
+                          "Hexanoic acid (Blood)"        = "ng/ml",
+                          "Iso-butyric acid (Blood)"     = "ng/ml",
+                          "Iso-valeric acid (Blood)"     = "ng/ml",
+                          "Propionic acid (Blood)"       = "ng/ml",
+                          "Valeric acid (Blood)"         = "ng/ml",
+                          "2-Methylbutyric acid (Stool)" = "µg/g",
+                          "Acetic acid (Stool)"          = "µg/g",
+                          "Butyric acid (Stool)"         = "µg/g",
+                          "Hexanoic acid (Stool)"        = "µg/g",
+                          "Iso-butyric acid (Stool)"     = "µg/g",
+                          "Iso-valeric acid (Stool)"     = "µg/g",
+                          "Propionic acid (Stool)"       = "µg/g",
+                          "Valeric acid (Stool)"         = "µg/g")
+
+col_vector  <- c("metabolites"  = "#E4F5E0",
+                 "inflammation" = "#FCEEF3",
+                 "leaky gut"    = "#FDEED9",
+                 "scfa (blood)" = "#DBEAFB",
+                 "scfa (stool)" = "#DBEAFB",
+                 "bcfa (blood)" = "#EBE1F4",
+                 "bcfa (stool)" = "#EBE1F4")
+col_vector2 <- c("metabolites"  = "#C8EBC1",
+                 "inflammation" = "#F5CCDC",
+                 "leaky gut"    = "#FADEB3",
+                 "scfa (blood)" = "#B7D4F6",
+                 "scfa (stool)" = "#B7D4F6",
+                 "bcfa (blood)" = "#D6C3E9",
+                 "bcfa (stool)" = "#D6C3E9")
+
+col_vector_withoutSCFAs  <- c("metabolites"  = "#E4F5E0",
+                              "inflammation" = "#FCEEF3",
+                              "leaky gut"    = "#DBEAFB")
+col_vector_withoutSCFAs2 <- c("metabolites"  = "#C8EBC1",
+                              "inflammation" = "#F5CCDC",
+                              "leaky gut"    = "#B7D4F6")
+```
+
+```{r create marker dataset}
+# restrict dataset to relevant variables and change marker data to long format
+dat_markers <- dat %>% 
+  select(participant_id, timepoint, group, treatment, intervention, inter_treat,
+         gender, age, bmi_t0,
+         glucose, fructosamine, insulin,
+         tnfr2, il6, scrp, rage,
+         lbp, fabp2, zonulin,
+         contains("Acid")) %>% 
+  pivot_longer(cols = all_of(c("glucose", "fructosamine", "insulin", "tnfr2", "il6", "scrp", "rage", "lbp", "fabp2", "zonulin",
+                               "blood_methylbutyricAcid", "blood_aceticAcid", "blood_butyricAcid", "blood_hexanoicAcid",
+                               "blood_isobutyricAcid", "blood_isovalericAcid", "blood_propionicAcid", "blood_valericAcid",
+                               "stool_methylbutyricAcid", "stool_aceticAcid", "stool_butyricAcid", "stool_hexanoicAcid",
+                               "stool_isobutyricAcid", "stool_isovalericAcid", "stool_propionicAcid", "stool_valericAcid")),
+               names_to = "marker")
+
+# add marker group variable
+dat_markers <- dat_markers %>% 
+  mutate(marker_group = case_when(marker %in% metabolic_markers    ~ "Metabolites",
+                                  marker %in% inflammation_markers ~ "Inflammation",
+                                  marker %in% leakyGut_markers     ~ "Leaky gut",
+                                  marker %in% SCFA_bloodMarkers    ~ "SCFA (blood)",
+                                  marker %in% SCFA_stoolMarkers    ~ "SCFA (stool)",
+                                  marker %in% BCFA_bloodMarkers    ~ "BCFA (blood)",
+                                  TRUE                             ~ "BCFA (stool)"),
+         marker = case_when(marker_group == "Metabolites"  ~ names(metabolic_markers)[   match(marker, metabolic_markers)],
+                            marker_group == "Inflammation" ~ names(inflammation_markers)[match(marker, inflammation_markers)],
+                            marker_group == "Leaky gut"    ~ names(leakyGut_markers)[    match(marker, leakyGut_markers)],
+                            marker_group == "SCFA (blood)" ~ names(SCFA_bloodMarkers)[    match(marker, SCFA_bloodMarkers)],
+                            marker_group == "SCFA (stool)" ~ names(SCFA_stoolMarkers)[    match(marker, SCFA_stoolMarkers)],
+                            marker_group == "BCFA (blood)" ~ names(BCFA_bloodMarkers)[    match(marker, BCFA_bloodMarkers)],
+                            TRUE                           ~ names(BCFA_stoolMarkers)[    match(marker, BCFA_stoolMarkers)]))
+```
+
+```{r marker development}
+# compute if a person's marker values fell or sunk
+dat_markersDiff <- dat_markers %>% 
+  filter(intervention != "FollowUp") %>% 
+  arrange(participant_id, marker, intervention, treatment) %>% 
+  group_by(participant_id, marker, intervention) %>% 
+  filter(n() == 2) %>% 
+  mutate(value_diff = diff(value)) %>% 
+  mutate(value_diffCat = ifelse(value_diff > 0, "positive", "negative"))
+# add this information to the main dataset
+ids_dat <- paste(dat_markers$participant_id,     dat_markers$marker,     dat_markers$intervention)
+ids_new <- paste(dat_markersDiff$participant_id, dat_markersDiff$marker, dat_markersDiff$intervention)
+dat_markers <- dat_markers %>%
+  mutate(value_diff    = dat_markersDiff$value_diff[   match(ids_dat, ids_new)],
+         value_diffCat = dat_markersDiff$value_diffCat[match(ids_dat, ids_new)])
+```
+
+
+# Plot blood markers
+
+```{r}
+# helper function
+plot_oneMarker <- function(markerGroup_name, marker_name, y_log10 = FALSE,
+                           col_vec = col_vector, col_vec2 = col_vector2) {
+  gg <- dat_markers %>% 
+    filter(marker_group == markerGroup_name,
+           marker       == marker_name) %>% 
+    ggplot(aes(x = treatment, y = value)) +
+    geom_boxplot(fill = col_vec2[tolower(markerGroup_name)], width = 0.5) +
+    geom_line(aes(group = participant_id, col = value_diffCat), alpha = .3) +
+    facet_grid(cols = vars(intervention), rows = vars(marker), scales = "free", space = "free_x") +
+    theme(axis.title.x       = element_blank(),
+          plot.title         = element_text(hjust = 0.5),
+          strip.background.y = element_rect(fill = col_vec[tolower(markerGroup_name)], color = col_vec[tolower(markerGroup_name)]),
+          strip.background.x = element_rect(fill = "gray95", color = "gray95"),
+          legend.position    = "none")
+  
+  gg <- if (y_log10) {
+    gg + scale_y_log10(paste0(marker_units[marker_name], ", on log10 scale"))
+  } else {
+    gg + ylab(marker_units[marker_name])
+  }
+  
+  gg
+}
+```
+
+
+## Metabolic markers
+
+```{r plot metabolic markers}
+#| warning: false
+#| message: false
+#| fig.width: 10
+#| fig.height: 6
+
+gg_frc <- plot_oneMarker("Metabolites", "Fructosamine") + theme(axis.text.x  = element_blank())
+gg_glc <- plot_oneMarker("Metabolites", "Glucose")      + theme(axis.text.x  = element_blank())
+gg_ins <- plot_oneMarker("Metabolites", "Insulin")      + theme(strip.text.x = element_blank())
+
+(gg_frc + gg_glc) / (gg_ins + ggplot())
+```
+
+
+## Inflammation markers
+
+Note: The following y axes are logarithmized, but the labels along the axes are
+original, unlogarithmized values.
+
+```{r plot inflammation markers}
+#| warning: false
+#| message: false
+#| fig.width: 10
+#| fig.height: 6
+
+gg_il6   <- plot_oneMarker("Inflammation", "IL-6",   y_log10 = TRUE) + theme(axis.text.x  = element_blank())
+gg_hscrp <- plot_oneMarker("Inflammation", "hsCRP", y_log10 = TRUE) + theme(axis.text.x  = element_blank())
+gg_tnfr2 <- plot_oneMarker("Inflammation", "sTNFR-2", y_log10 = TRUE) + theme(strip.text.x = element_blank())
+gg_rage  <- plot_oneMarker("Inflammation", "sRAGE",  y_log10 = TRUE) + theme(strip.text.x = element_blank())
+
+(gg_il6 + gg_hscrp) / (gg_tnfr2 + gg_rage)
+```
+
+## Leaky gut markers
+
+```{r plot leaky gut markers}
+#| warning: false
+#| message: false
+#| fig.width: 10
+#| fig.height: 6
+
+gg_lbp     <- plot_oneMarker("Leaky gut", "LBP")     + theme(axis.text.x  = element_blank())
+gg_fabp2   <- plot_oneMarker("Leaky gut", "FABP-2")   + theme(axis.text.x  = element_blank())
+gg_zonulin <- plot_oneMarker("Leaky gut", "Zonulin") + theme(strip.text.x = element_blank())
+
+(gg_lbp + gg_fabp2) / (gg_zonulin + ggplot())
+```
+
+
+## Short / Branch chain fatty acids (Blood measurements)
+
+```{r plot blood SCFAs}
+#| warning: false
+#| message: false
+#| fig.width: 10
+#| fig.height: 6
+
+gg_aca     <- plot_oneMarker("SCFA (blood)", "Acetic acid (Blood)")          + theme(axis.text.x  = element_blank())
+gg_ppa     <- plot_oneMarker("SCFA (blood)", "Propionic acid (Blood)")       + theme(axis.text.x  = element_blank())
+gg_bta     <- plot_oneMarker("SCFA (blood)", "Butyric acid (Blood)")         + theme(strip.text.x = element_blank())
+gg_vla     <- plot_oneMarker("SCFA (blood)", "Valeric acid (Blood)")         + theme(strip.text.x = element_blank())
+gg_hxa     <- plot_oneMarker("SCFA (blood)", "Hexanoic acid (Blood)")        + theme(axis.text.x  = element_blank())
+
+gg_iba     <- plot_oneMarker("BCFA (blood)", "Iso-butyric acid (Blood)")     + theme(axis.text.x  = element_blank())
+gg_iva     <- plot_oneMarker("BCFA (blood)", "Iso-valeric acid (Blood)")     + theme(strip.text.x = element_blank())
+gg_2ma     <- plot_oneMarker("BCFA (blood)", "2-Methylbutyric acid (Blood)") + theme(strip.text.x = element_blank())
+
+(gg_aca + gg_ppa) / (gg_bta + gg_vla)
+(gg_hxa + gg_iba) / (gg_iva + gg_2ma)
+```
+
+
+## Short / Branch chain fatty acids (Stool measurements)
+
+```{r plot stool SCFAs}
+#| warning: false
+#| message: false
+#| fig.width: 10
+#| fig.height: 6
+
+gg_aca     <- plot_oneMarker("SCFA (stool)", "Acetic acid (Stool)")          + theme(axis.text.x  = element_blank())
+gg_ppa     <- plot_oneMarker("SCFA (stool)", "Propionic acid (Stool)")       + theme(axis.text.x  = element_blank())
+gg_bta     <- plot_oneMarker("SCFA (stool)", "Butyric acid (Stool)")         + theme(strip.text.x = element_blank())
+gg_vla     <- plot_oneMarker("SCFA (stool)", "Valeric acid (Stool)")         + theme(strip.text.x = element_blank())
+gg_hxa     <- plot_oneMarker("SCFA (stool)", "Hexanoic acid (Stool)")        + theme(axis.text.x  = element_blank())
+
+gg_iba     <- plot_oneMarker("BCFA (stool)", "Iso-butyric acid (Stool)")     + theme(axis.text.x  = element_blank())
+gg_iva     <- plot_oneMarker("BCFA (stool)", "Iso-valeric acid (Stool)")     + theme(strip.text.x = element_blank())
+gg_2ma     <- plot_oneMarker("BCFA (stool)", "2-Methylbutyric acid (Stool)") + theme(strip.text.x = element_blank())
+
+(gg_aca + gg_ppa) / (gg_bta + gg_vla)
+(gg_hxa + gg_iba) / (gg_iva + gg_2ma)
+```
+
+
+## SCFA / BCFA blood vs. stool
+
+##### Correlations
+
+Spearman correlations between blood and stool measurements:
+
+```{r}
+cor_aca <- cor(dat$blood_aceticAcid,        dat$stool_aceticAcid,        method = "spearman")
+cor_ppa <- cor(dat$blood_propionicAcid,     dat$stool_propionicAcid,     method = "spearman")
+cor_bta <- cor(dat$blood_butyricAcid,       dat$stool_butyricAcid,       method = "spearman")
+cor_vla <- cor(dat$blood_valericAcid,       dat$stool_valericAcid,       method = "spearman")
+cor_hxa <- cor(dat$blood_hexanoicAcid,      dat$stool_hexanoicAcid,      method = "spearman")
+cor_iba <- cor(dat$blood_isobutyricAcid,    dat$stool_isobutyricAcid,    method = "spearman")
+cor_iva <- cor(dat$blood_isovalericAcid,    dat$stool_isovalericAcid,    method = "spearman")
+cor_2ma <- cor(dat$blood_methylbutyricAcid, dat$stool_methylbutyricAcid, method = "spearman")
+```
+
+- Acetic acid: `r round(cor_aca, 2)`
+- Propionic acid: `r round(cor_ppa, 2)`
+- Butyric acid: `r round(cor_bta, 2)`
+- Valeric acid: `r round(cor_vla, 2)`
+- Hexanoic acid: `r round(cor_hxa, 2)`
+- Isobutyric acid: `r round(cor_iba, 2)`
+- Isovaleric acid: `r round(cor_iva, 2)`
+- Methylbutyric acid: `r round(cor_2ma, 2)`
+
+
+##### Figure for supplements
+
+```{r}
+# helper function
+plot_bloodVSstoolSCFA <- function(dat, scfa_marker, log_stool = FALSE, log_blood = FALSE) {
+  
+  colnames(dat)[colnames(dat) == paste0("stool_",scfa_marker)] <- "x_stool"
+  colnames(dat)[colnames(dat) == paste0("blood_",scfa_marker)] <- "x_blood"
+  
+  if (log_stool) {
+    dat$x_stool <- log(dat$x_stool + 1)
+  }
+  if (log_blood) {
+    dat$x_blood <- log(dat$x_blood + 1)
+  }
+  
+  # smooth_color <- ifelse(paste0("blood_",scfa_marker) %in% SCFA_bloodMarkers,
+  #                        col_vector2["scfa (blood)"], col_vector2["bcfa (blood)"])
+  
+  x_label <- ifelse(paste0("blood_",scfa_marker) %in% SCFA_bloodMarkers,
+                    names(SCFA_bloodMarkers)[match(paste0("blood_",scfa_marker), SCFA_bloodMarkers)],
+                    names(BCFA_bloodMarkers)[match(paste0("blood_",scfa_marker), BCFA_bloodMarkers)]) %>% 
+    gsub(pattern = " \\(Blood)", replacement = "")
+  x_bloodUnit <- marker_units[match(paste0(x_label, " (Blood)"), names(marker_units))] %>% unname()
+  x_stoolUnit <- marker_units[match(paste0(x_label, " (Stool)"), names(marker_units))] %>% unname()
+  
+  ggplot(dat, aes(x = x_blood, y = x_stool)) +
+    geom_point(col = "gray30", size = 3, stroke = 0, alpha = 0.6) +
+    geom_smooth(se = FALSE, col = "#009ACD", lwd = 2, span = 1) +
+    ggtitle(x_label) +
+    xlab(paste0(ifelse(log_blood, "Log. blood", "Blood")," measurements [",x_bloodUnit,"]")) +
+    ylab(paste0(ifelse(log_stool, "Log. stool", "Stool")," measurements [",x_stoolUnit,"]")) +
+    theme_minimal(base_size = 16) +
+    theme(plot.title = element_text(hjust = 0.5))
+}
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| fig.width: 20
+#| fig.height: 18
+
+gg_aca    <- plot_bloodVSstoolSCFA(dat, "aceticAcid",    log_blood = TRUE) + theme(panel.grid.minor = element_blank())
+gg_ppa    <- plot_bloodVSstoolSCFA(dat, "propionicAcid", log_blood = TRUE) + theme(axis.title.y = element_blank(), panel.grid.minor = element_blank())
+gg_bta    <- plot_bloodVSstoolSCFA(dat, "butyricAcid",   log_blood = TRUE) + theme(axis.title.y = element_blank(), panel.grid.minor = element_blank())
+gg_vla    <- plot_bloodVSstoolSCFA(dat, "valericAcid",   log_blood = TRUE) + theme(axis.title.y = element_blank(), panel.grid.minor = element_blank())
+gg_hxa    <- plot_bloodVSstoolSCFA(dat, "hexanoicAcid") + theme(panel.grid.minor = element_blank())
+gg_iba    <- plot_bloodVSstoolSCFA(dat, "isobutyricAcid") + theme(axis.title.y = element_blank(), panel.grid.minor = element_blank())
+gg_iva    <- plot_bloodVSstoolSCFA(dat, "isovalericAcid", log_blood = TRUE) + theme(axis.title.y = element_blank(), panel.grid.minor = element_blank())
+gg_2ma    <- plot_bloodVSstoolSCFA(dat, "methylbutyricAcid") + theme(axis.title.y = element_blank(), panel.grid.minor = element_blank())
+
+(gg_aca | gg_ppa | gg_bta | gg_vla) /
+  (gg_hxa | gg_iba | gg_iva | gg_2ma)
+# ggsave("FigureS15_SCFAs_stoolVSblood.png", width = 16, height = 6)
+```
+
+
+
+# Further joint version of figures
+
+```{r}
+#| column: page
+#| fig-width: 16
+#| fig-height: 15
+#| warning: false
+#| message: false
+
+gg_frc     <- plot_oneMarker("Metabolites", "Fructosamine") + theme(axis.text.x  = element_blank())
+gg_glc     <- plot_oneMarker("Metabolites", "Glucose")      + theme(axis.text.x  = element_blank())
+gg_ins     <- plot_oneMarker("Metabolites", "Insulin")      + theme(axis.text.x = element_blank())
+gg_il6     <- plot_oneMarker("Inflammation", "IL-6",    y_log10 = TRUE) + theme(axis.text.x = element_blank(), strip.text.x = element_blank())
+gg_hscrp   <- plot_oneMarker("Inflammation", "hsCRP",   y_log10 = TRUE) + theme(axis.text.x = element_blank(), strip.text.x = element_blank())
+gg_tnfr2   <- plot_oneMarker("Inflammation", "sTNFR-2", y_log10 = TRUE) + theme(axis.text.x = element_blank(), strip.text.x = element_blank())
+gg_rage    <- plot_oneMarker("Inflammation", "sRAGE",   y_log10 = TRUE) + theme(axis.text.x = element_blank())
+gg_lbp     <- plot_oneMarker("Leaky gut", "LBP")     + theme(axis.text.x = element_blank(), strip.text.x = element_blank())
+gg_fabp2   <- plot_oneMarker("Leaky gut", "FABP-2")  + theme(axis.text.x = element_blank(), strip.text.x = element_blank())
+gg_zonulin <- plot_oneMarker("Leaky gut", "Zonulin") + theme(axis.text.x = element_blank(), strip.text.x = element_blank())
+gg_aca     <- plot_oneMarker("SCFA (blood)", "Acetic acid (Blood)")    + theme(axis.text.x = element_blank(), strip.text.x = element_blank())
+gg_ppa     <- plot_oneMarker("SCFA (blood)", "Propionic acid (Blood)") + theme(axis.text.x = element_blank(), strip.text.x = element_blank())
+gg_bta     <- plot_oneMarker("SCFA (blood)", "Butyric acid (Blood)")   + theme(axis.text.x = element_blank(), strip.text.x = element_blank())
+gg_vla     <- plot_oneMarker("SCFA (blood)", "Valeric acid (Blood)")   + theme(axis.text.x = element_blank(), strip.text.x = element_blank())
+gg_hxa     <- plot_oneMarker("SCFA (blood)", "Hexanoic acid (Blood)")        + theme(strip.text.x = element_blank())
+gg_iba     <- plot_oneMarker("BCFA (blood)", "Iso-butyric acid (Blood)")     + theme(strip.text.x = element_blank())
+gg_iva     <- plot_oneMarker("BCFA (blood)", "Iso-valeric acid (Blood)")     + theme(strip.text.x = element_blank())
+gg_2ma     <- plot_oneMarker("BCFA (blood)", "2-Methylbutyric acid (Blood)") + theme(strip.text.x = element_blank())
+
+
+row1 <- (gg_frc + gg_glc   + gg_ins     + ggplot()) + patchwork::plot_layout(nrow = 1, widths = c(1.01,.98,1.03,1.18))
+row2 <- (gg_il6 + gg_hscrp + gg_tnfr2   + gg_rage)  + patchwork::plot_layout(nrow = 1, widths = 1)
+row3 <- (gg_lbp + gg_fabp2 + gg_zonulin + ggplot()) + patchwork::plot_layout(nrow = 1, widths = c(1.01,.98,1.03,1.18))
+row4 <- (gg_aca + gg_ppa   + gg_bta     + gg_vla)   + patchwork::plot_layout(nrow = 1, widths = 1)
+row5 <- (gg_hxa + gg_iba   + gg_iva     + gg_2ma)   + patchwork::plot_layout(nrow = 1, widths = 1)
+
+row1 / row2 / row3 / row4 / row5
+# ggsave("descriptives_allMarkers.png", width = 16, height = 12.5)
+```
+
+
+```{r}
+#| column: page
+#| fig-width: 16
+#| fig-height: 6
+#| warning: false
+#| message: false
+
+gg_il6     <- plot_oneMarker("Inflammation", "IL-6",   y_log10 = TRUE) + theme(axis.text.x = element_blank())
+gg_hscrp   <- plot_oneMarker("Inflammation", "hsCRP", y_log10 = TRUE) + theme(axis.text.x = element_blank())
+gg_tnfr2   <- plot_oneMarker("Inflammation", "sTNFR-2", y_log10 = TRUE) + theme(axis.text.x = element_blank())
+gg_rage    <- plot_oneMarker("Inflammation", "sRAGE",  y_log10 = TRUE)
+gg_lbp     <- plot_oneMarker("Leaky gut", "LBP")
+gg_fabp2   <- plot_oneMarker("Leaky gut", "FABP-2")
+gg_zonulin <- plot_oneMarker("Leaky gut", "Zonulin")
+
+row1 <- (gg_il6 + gg_hscrp + gg_tnfr2 + gg_rage) + patchwork::plot_layout(nrow = 1, widths = 1)
+row2 <- (gg_lbp + gg_fabp2 + gg_zonulin + ggplot()) + patchwork::plot_layout(nrow = 1, widths = c(1.01,.98,1.03,1.18))
+
+row1 / row2
+# ggsave("descriptives_inflam_leaky.png", width = 16, height = 5)
+```
+
+
+```{r}
+#| column: page
+#| fig-width: 16
+#| fig-height: 9
+#| warning: false
+#| message: false
+
+gg_frc     <- plot_oneMarker("Metabolites", "Fructosamine") + theme(axis.text.x  = element_blank())
+gg_glc     <- plot_oneMarker("Metabolites", "Glucose")      + theme(axis.text.x  = element_blank())
+gg_ins     <- plot_oneMarker("Metabolites", "Insulin")      + theme(axis.text.x = element_blank())
+gg_il6     <- plot_oneMarker("Inflammation", "IL-6",    y_log10 = TRUE) + theme(axis.text.x = element_blank(), strip.text.x = element_blank())
+gg_hscrp   <- plot_oneMarker("Inflammation", "hsCRP",   y_log10 = TRUE) + theme(axis.text.x = element_blank(), strip.text.x = element_blank())
+gg_tnfr2   <- plot_oneMarker("Inflammation", "sTNFR-2", y_log10 = TRUE) + theme(axis.text.x = element_blank(), strip.text.x = element_blank())
+gg_rage    <- plot_oneMarker("Inflammation", "sRAGE",   y_log10 = TRUE) + theme(axis.text.x = element_blank())
+gg_lbp     <- plot_oneMarker("Leaky gut", "LBP",     col_vec = col_vector_withoutSCFAs, col_vec2 = col_vector_withoutSCFAs2) +
+  theme(axis.text.x = element_blank(), strip.text.x = element_blank())
+gg_fabp2   <- plot_oneMarker("Leaky gut", "FABP-2",  col_vec = col_vector_withoutSCFAs, col_vec2 = col_vector_withoutSCFAs2) +
+  theme(axis.text.x = element_blank(), strip.text.x = element_blank())
+gg_zonulin <- plot_oneMarker("Leaky gut", "Zonulin", col_vec = col_vector_withoutSCFAs, col_vec2 = col_vector_withoutSCFAs2) +
+  theme(axis.text.x = element_blank(), strip.text.x = element_blank())
+
+
+row1 <- (gg_frc + gg_glc   + gg_ins     + ggplot()) + patchwork::plot_layout(nrow = 1, widths = c(1.01,.98,1.03,1.18))
+row2 <- (gg_il6 + gg_hscrp + gg_tnfr2   + gg_rage)  + patchwork::plot_layout(nrow = 1, widths = 1)
+row3 <- (gg_lbp + gg_fabp2 + gg_zonulin + ggplot()) + patchwork::plot_layout(nrow = 1, widths = c(1.01,.98,1.03,1.18))
+
+row1 / row2 / row3
+# ggsave("descriptives_allMarkers_withoutSCFAs.png", width = 16, height = 7.5)
+```

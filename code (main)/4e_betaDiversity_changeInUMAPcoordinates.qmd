@@ -1,0 +1,870 @@
+---
+title: "Dimension Reduction for Taxonomy Data -- Change Analysis"
+format:
+  html:
+    toc: true
+    code-fold: true
+    embed-resources: true
+---
+
+This document takes the final UMAP dimension reduction results and tries to find
+groups of participants that are similar in (directional) change between the
+timepoints.
+
+## Data preparation and UMAP estimation
+
+```{r packages}
+#| warning: false
+
+library(sauerkrautTaxonomyBuddy)
+library(SummarizedExperiment) # microbiome analysis
+library(mia)                  # microbiome analysis
+library(vegan)                # (dis)similarity measures
+
+library(scater)     # dimension reduction and visualizations
+library(mgcv)       # estimate smooth surfaces with gam()
+library(mgcViz)     # visualize gam models
+
+library(dplyr)      # data handling
+library(tidyr)      # data transformation
+library(ggplot2)    # data visualization
+library(patchwork)  # joint ggplots
+library(kableExtra) # table printing
+
+# set ggplot2 theme
+theme_set(
+  theme_minimal() +
+    theme(plot.title       = element_text(hjust = 0.5),
+          plot.subtitle    = element_text(hjust = 0.5),
+          panel.grid.minor = element_blank())
+)
+```
+
+```{r set file paths}
+define_dataPaths()
+```
+
+```{r data preparation}
+#| warning: false
+
+tse <- readAndPrepare_mainTaxonomicData(path_groupInfoRdata               = path_groupInfoRdata,
+                                        path_participantRdata             = path_participantRdata,
+                                        path_samplesIDxlsx                = path_samplesIDxlsx,
+                                        path_dietInfoCsv                  = path_dietInfoCsv,
+                                        path_nutrientInfoCsv              = path_nutrientInfoCsv,
+                                        path_bloodMetabolomeXlsx          = path_bloodMetabolomeXlsx,
+                                        path_stoolMetabolomeXlsx          = path_stoolMetabolomeXlsx,
+                                        path_T4questXlsx                  = path_T4questXlsx,
+                                        path_stoolInfoXlsx                = path_stoolInfoXlsx,
+                                        path_bodyMeasuresXlsx             = path_bodyMeasuresXlsx,
+                                        path_absTaxonomyData              = path_absTaxonomyData,
+                                        path_relTaxonomyData              = path_relTaxonomyData,
+                                        path_sampleLookupXlsx             = path_sampleLookupXlsx,
+                                        path_krautLookupXlsx              = path_krautLookupXlsx,
+                                        path_bloodMarkerBostonRdata       = path_bloodMarkerBostonRdata,
+                                        path_bloodMarkerZentrallaborRdata = path_bloodMarkerZentrallaborRdata,
+                                        path_bloodMarkerBostonXlsx        = path_bloodMarkerBostonXlsx,
+                                        path_bloodMarkerZentrallaborXlsx  = path_bloodMarkerZentrallaborXlsx,
+                                        aggregation_level                 = "species",
+                                        exclude_sickParticipants          = "taxonomy paper")
+
+# add further features to colData(tse)
+tse <- tse_addTaxaFeatures(tse          = tse,
+                           assay_relAbd = "relAbd")
+
+# save colData() as a separate data.frame
+dat <- tse %>% colData() %>% as.data.frame()
+```
+
+```{r}
+# add strata information
+dat <- dat %>% 
+  mutate(age_cat        = case_when(age < 50 ~ paste0(min(age), "-49"),
+                                    TRUE     ~ paste0("50-", max(age))),
+         age_cat        = factor(age_cat),
+         bmi_cat        = case_when(bmi_t0 < 25 ~ paste0("[", floor(min(bmi_t0)), ", 25)"),
+                                    TRUE        ~ paste0("[25, ", ceiling(max(bmi_t0)), "]")),
+         bmi_cat        = factor(bmi_cat))
+```
+
+```{r estimate UMAP}
+#| warning: false
+#| message: false
+#| results: hide
+
+set.seed(2025)
+tse <- tse %>% runUMAP(name = "UMAP", exprs_values = "relAbd")
+
+dat_UMAP <- tse %>% 
+  reducedDim("UMAP") %>% 
+  dplyr::bind_cols(dat)
+```
+
+
+## base UMAP plot
+
+```{r create plot}
+#| warning: false
+
+plot_list <- plot_dimReduction(tse                = tse,
+                               dimReduction_name  = "UMAP",
+                               assay              = "relAbd",
+                               taxRank_dominance  = "species",
+                               taxRank_topNfocus  = 13)
+plot_list$gg_basePlot
+```
+
+
+## Calculate (directional) changes based on UMAP coordinates
+
+```{r}
+# put the data preparation in a function, s.t. it's easily applicable also to subgroups in dat_UMAP
+create_changeDat <- function(dat_UMAP) {
+  # create the location dataset
+  dat_change <- dat_UMAP %>% 
+    dplyr::rename(x = UMAP1,
+                  y = UMAP2) %>% 
+    select(participant_id, intervention, timepoint, x, y) %>% 
+    pivot_wider(id_cols = participant_id, names_from = timepoint, values_from = c("x", "y")) %>% 
+    arrange(participant_id)
+  
+  # add the directional change variables
+  dat_change <- dat_change %>% 
+    mutate(xChange_T1toT2           = x_T2 - x_T1,
+           yChange_T1toT2           = y_T2 - y_T1,
+           totalAbsChange_T1toT2    = abs(xChange_T1toT2) + abs(yChange_T1toT2),
+           totalAvgAbsChange_T1toT2 = totalAbsChange_T1toT2 / 2,
+           xChange_T2toT3           = x_T3 - x_T2,
+           yChange_T2toT3           = y_T3 - y_T2,
+           totalAbsChange_T2toT3    = abs(xChange_T2toT3) + abs(yChange_T2toT3),
+           totalAvgAbsChange_T2toT3 = totalAbsChange_T2toT3 / 2,
+           xChange_T3toT4           = x_T4 - x_T3,
+           yChange_T3toT4           = y_T4 - y_T3,
+           totalAbsChange_T3toT4    = abs(xChange_T3toT4) + abs(yChange_T3toT4),
+           totalAvgAbsChange_T3toT4 = totalAbsChange_T3toT4 / 2)
+  
+  if ("x_T5" %in% colnames(dat_change)) {
+    dat_change <- dat_change %>% 
+      mutate(xChange_T4toT5           = x_T5 - x_T4,
+             yChange_T4toT5           = y_T5 - y_T4,
+             totalAbsChange_T4toT5    = abs(xChange_T4toT5) + abs(yChange_T4toT5),
+             totalAvgAbsChange_T4toT5 = totalAbsChange_T4toT5 / 2)
+  } else {
+    dat_change <- dat_change %>% 
+      mutate(xChange_T4toT5           = NA,
+             yChange_T4toT5           = NA,
+             totalAbsChange_T4toT5    = NA,
+             totalAvgAbsChange_T4toT5 = NA)
+  }
+  
+  # add the overall change variable
+  dat_change <- dat_change %>% 
+    mutate(n_observedChanges       = as.numeric(!is.na(totalAbsChange_T1toT2)) + as.numeric(!is.na(totalAbsChange_T2toT3)) +
+             as.numeric(!is.na(totalAbsChange_T3toT4)) + as.numeric(!is.na(totalAbsChange_T4toT5))) %>% 
+    rowwise() %>% 
+    mutate(totalAbsChange_total    = sum(c(totalAbsChange_T1toT2, totalAbsChange_T2toT3, totalAbsChange_T3toT4, totalAbsChange_T4toT5), na.rm = TRUE),
+           totalAvgAbsChange_total = totalAbsChange_total / (2*n_observedChanges),
+           xAbsChange_total        = sum(abs(c(xChange_T1toT2, xChange_T2toT3, xChange_T3toT4, xChange_T4toT5)), na.rm = TRUE),
+           xAvgAbsChange_total     = xAbsChange_total / n_observedChanges,
+           yAbsChange_total        = sum(abs(c(yChange_T1toT2, yChange_T2toT3, yChange_T3toT4, yChange_T4toT5)), na.rm = TRUE),
+           yAvgAbsChange_total     = yAbsChange_total / n_observedChanges)
+  
+  # add a avgAbsBaselineChange variable, containing the average pairwise change between T1, T3, T5, averaged over x and y
+  dat_change <- dat_change %>% 
+    rowwise() %>% 
+    mutate(xChange_T1toT3 = x_T3 - x_T1,
+           xChange_T1toT5 = x_T5 - x_T1,
+           xChange_T3toT5 = x_T5 - x_T3,
+           yChange_T1toT3 = y_T3 - y_T1,
+           yChange_T1toT5 = y_T5 - y_T1,
+           yChange_T3toT5 = y_T5 - y_T3,
+           avgAbsBaselineChange = sum(abs(c(xChange_T1toT3, xChange_T1toT5, xChange_T3toT5,
+                                            yChange_T1toT3, yChange_T1toT5, yChange_T3toT5)), na.rm = TRUE) / 6,
+           avgAbsBaselineChange_T1toT3 = sum(abs(c(xChange_T1toT3, yChange_T1toT3)), na.rm = TRUE) / 2,
+           avgAbsBaselineChange_T1toT5 = sum(abs(c(xChange_T1toT5, yChange_T1toT5)), na.rm = TRUE) / 2,
+           avgAbsBaselineChange_T3toT5 = sum(abs(c(xChange_T3toT5, yChange_T3toT5)), na.rm = TRUE) / 2)
+  
+  dat_change
+}
+```
+
+```{r}
+dat_change <- create_changeDat(dat_UMAP)
+
+# create a long dataset for plotting
+timepoints <- c("T2","T3","T4","T5")
+dat_plot <- data.frame(participant_id = rep(dat_change$participant_id, each = length(timepoints)),
+                       timepoint      = rep(timepoints, times = nrow(dat_change)),
+                       xCoord         = c(dat_change$x_T2, dat_change$x_T3, dat_change$x_T4, dat_change$x_T5),
+                       yCoord         = c(dat_change$y_T2, dat_change$y_T3, dat_change$y_T4, dat_change$y_T5),
+                       xCoord_change  = c(dat_change$xChange_T1toT2, dat_change$xChange_T2toT3, dat_change$xChange_T3toT4, dat_change$xChange_T4toT5),
+                       yCoord_change  = c(dat_change$yChange_T1toT2, dat_change$yChange_T2toT3, dat_change$yChange_T3toT4, dat_change$yChange_T4toT5),
+                       avgAbs_change  = c(dat_change$totalAvgAbsChange_T1toT2, dat_change$totalAvgAbsChange_T2toT3,
+                                          dat_change$totalAvgAbsChange_T3toT4, dat_change$totalAvgAbsChange_T4toT5))
+```
+
+
+# Description of changes in UMAP
+
+The following plots visualize the changes *leading to the timepoint*.
+For example for a measurement taken at T4 this corresponds to the *change from T3 to T4*.
+
+
+##### Overall change
+
+```{r}
+#| warning: false
+
+# overall change
+ggplot(dat_plot, aes(x = xCoord, y = yCoord, col = avgAbs_change)) +
+  geom_point(size = 2) +
+  scale_color_gradient2(low = "firebrick3", mid = "gray90", high = "dodgerblue3") +
+  ggtitle("Average change over x and y coordinates leading to the timepoint")
+```
+
+```{r}
+# heatmap for overall change
+m <- gam(avgAbs_change ~ te(xCoord, yCoord), data = dat_plot)
+m %>% getViz() %>% sm(1) %>% plot() + ggtitle("Heatmap to the above plot")
+```
+
+
+##### Changes in x and y coordinates
+
+```{r}
+#| warning: false
+#| column: page
+#| fig.width: 12
+
+# changes in x and y coordinates
+gg_xChange <- ggplot(dat_plot, aes(x = xCoord, y = yCoord, col = xCoord_change)) +
+  geom_point(size = 2) +
+  scale_color_gradient2(low = "firebrick3", mid = "gray90", high = "dodgerblue3") +
+  ggtitle("Change in x coordinate leading to the timepoint")
+
+gg_yChange <- ggplot(dat_plot, aes(x = xCoord, y = yCoord, col = yCoord_change)) +
+  geom_point(size = 2) +
+  scale_color_gradient2(low = "firebrick3", mid = "gray90", high = "dodgerblue3") +
+  ggtitle("Change in y coordinate leading to the timepoint")
+
+gg_xChange + gg_yChange
+```
+
+```{r}
+# heatmap for change in x
+mx <- gam(xCoord_change ~ te(xCoord, yCoord), data = dat_plot)
+mx %>% getViz() %>% sm(1) %>% plot() + ggtitle("Heatmap to the above x plot")
+
+# heatmap for change in y
+my <- gam(yCoord_change ~ te(xCoord, yCoord), data = dat_plot)
+my %>% getViz() %>% sm(1) %>% plot() + ggtitle("Heatmap to the above y plot")
+```
+
+
+# Regression models on UMAP coordinate change
+
+## Model on average absolute change
+
+```{r}
+#| warning: false
+
+# data preparation
+dat_modelTotal <- dat_change %>%
+  select(participant_id, starts_with("totalAvgAbsChange"), starts_with("avgAbsBaselineChange")) %>% 
+  pivot_longer(cols = starts_with("totalAvgAbsChange"), names_to = "parameter") %>% 
+  filter(grepl("T1toT2", parameter) | grepl("T3toT4", parameter),
+         !is.na(value)) %>% 
+  dplyr::left_join(dat %>% distinct(participant_id, .keep_all = TRUE) %>% select(participant_id, gender, age, bmi_t0, diet_veggie, starts_with("dailyConsumption"), starts_with("diversity")),
+                   by = "participant_id") %>% 
+  mutate(timepoint = substr(parameter, nchar(parameter) - 1, nchar(parameter))) %>% 
+  dplyr::left_join(dat %>% select(participant_id, timepoint, intervention, starts_with("dominant_species")),
+                   by = c("participant_id", "timepoint"))
+
+# description
+ggplot(dat_modelTotal, aes(x = gender, y = value, fill = intervention)) +
+  geom_boxplot() +
+  ggtitle("Average absolute total change by gender and intervention")
+
+# model estimation
+mTotal <- gam(value ~ intervention + gender + age + bmi_t0 + diversity_shannon + s(participant_id, bs = "re"),
+              data = dat_modelTotal)
+
+# results
+APCtools::create_modelSummary(list(mTotal))[[1]] %>% kable_styling()
+```
+
+
+##### Estimate the same model with T1 vs. T3 as baseline reference
+
+Dominant species reference category is Blautia wexlerae.
+
+```{r}
+#| warning: false
+
+# data preparation
+dat_modelTotal_T1toT3 <- dat_change %>%
+  select(participant_id, starts_with("avgAbsBaselineChange")) %>% 
+  pivot_longer(cols = starts_with("avgAbsBaselineChange"), names_to = "parameter") %>% 
+  filter(grepl("T1toT3", parameter), !is.na(value)) %>% 
+  dplyr::left_join(dat %>% distinct(participant_id, .keep_all = TRUE) %>% select(participant_id, gender, age, bmi_t0, starts_with("diversity"), dominant_species),
+                   by = "participant_id") %>% 
+  mutate(timepoint    = "T3",
+         intervention = "baseline")
+
+tab_domSpec    <- sort(table(dat$dominant_species), decreasing = TRUE)
+domSpec_catVec <- names(tab_domSpec[tab_domSpec >= 15]) %>% append("other")
+dat_modelTotal_test <- dat_modelTotal %>% 
+  dplyr::bind_rows(dat_modelTotal_T1toT3) %>% 
+  mutate(domSpec_cat = case_when(dominant_species %in% domSpec_catVec ~ dominant_species,
+                                 TRUE                                 ~ "other"),
+         domSpec_cat = factor(domSpec_cat, levels = domSpec_catVec))
+
+# description
+ggplot(dat_modelTotal_test, aes(x = gender, y = value, fill = intervention)) +
+  geom_boxplot() +
+  ggtitle("Average absolute total change by gender and intervention")
+
+ggplot(dat_modelTotal_test, aes(x = domSpec_cat, y = value, fill = intervention)) +
+  geom_boxplot() +
+  ggtitle("Average absolute total change by dominant species and intervention") +
+  theme(axis.text.x  = element_text(angle = 45, hjust = 1),
+        axis.title.x = element_blank())
+
+dat_modelTotal_test %>% 
+  mutate(divSh_cat = cut(diversity_shannon, breaks = c(1.25, quantile(diversity_shannon, probs = c(1,2,3)/3)))) %>% 
+  ggplot(aes(x = divSh_cat, y = value, fill = intervention)) +
+  geom_boxplot() +
+  ggtitle("Average absolute total change by Shannon diversity and intervention") +
+  theme(axis.text.x  = element_text(angle = 45, hjust = 1),
+        axis.title.x = element_blank())
+
+# model estimation
+mTotal <- gam(value ~ intervention + gender + age + bmi_t0 + diversity_shannon + domSpec_cat + s(participant_id, bs = "re"),
+              data = dat_modelTotal_test)
+
+# results
+APCtools::create_modelSummary(list(mTotal))[[1]] %>% kable_styling()
+```
+
+
+
+## Model on x change
+
+```{r}
+#| warning: false
+
+# data preparation
+dat_modelX <- dat_change %>%
+  select(participant_id, starts_with("xChange")) %>% 
+  pivot_longer(cols = starts_with("xChange"), names_to = "parameter") %>% 
+  filter(grepl("T1toT2", parameter) | grepl("T3toT4", parameter),
+         !is.na(value)) %>% 
+  dplyr::left_join(dat %>% distinct(participant_id, .keep_all = TRUE) %>% select(participant_id, gender, age, bmi_t0),
+                   by = "participant_id") %>% 
+  mutate(timepoint = substr(parameter, nchar(parameter) - 1, nchar(parameter))) %>% 
+  dplyr::left_join(dat %>% select(participant_id, timepoint, intervention),
+                   by = c("participant_id", "timepoint"))
+
+# description
+ggplot(dat_modelX, aes(x = gender, y = value, fill = intervention)) +
+  geom_boxplot() +
+  ggtitle("Change in x by gender and intervention")
+
+# model estimation
+mX <- gam(value ~ intervention*gender + age + bmi_t0 + s(participant_id, bs = "re"),
+          data = dat_modelX)
+
+# results
+APCtools::create_modelSummary(list(mX))[[1]] %>% kable_styling()
+```
+
+
+## Model on y change
+
+```{r}
+#| warning: false
+
+# data preparation
+dat_modelY <- dat_change %>%
+  select(participant_id, starts_with("yChange")) %>% 
+  pivot_longer(cols = starts_with("yChange"), names_to = "parameter") %>% 
+  filter(grepl("T1toT2", parameter) | grepl("T3toT4", parameter),
+         !is.na(value)) %>% 
+  dplyr::left_join(dat %>% distinct(participant_id, .keep_all = TRUE) %>% select(participant_id, gender, age, bmi_t0),
+                   by = "participant_id") %>% 
+  mutate(timepoint = substr(parameter, nchar(parameter) - 1, nchar(parameter))) %>% 
+  dplyr::left_join(dat %>% select(participant_id, timepoint, intervention),
+                   by = c("participant_id", "timepoint"))
+
+# description
+ggplot(dat_modelY, aes(x = gender, y = value, fill = intervention)) +
+  geom_boxplot() +
+  ggtitle("Change in y by gender and intervention")
+
+# model estimation
+mY <- gam(value ~ intervention*gender + age + bmi_t0 + s(participant_id, bs = "re"),
+          data = dat_modelY)
+
+# results
+APCtools::create_modelSummary(list(mY))[[1]] %>% kable_styling()
+```
+
+
+
+# Average absolute change against other variables
+
+This section analyses if there are specific conditions that show stronger UMAP coordinate variation.
+The latter is analyzed in categories: low (0-0.5) / mid (0.5-1) / high (>1) average absolute variation.
+
+```{r}
+dat_catVar <- dat_modelTotal %>% 
+  mutate(UMAPvar_cat = case_when(value > 1   ~ "high",
+                                 value > 0.5 ~ "mid",
+                                 TRUE        ~ "low"),
+         UMAPvar_cat = factor(UMAPvar_cat, levels = c("low","mid","high")),
+         avgAbsBaselineChange_cat = case_when(avgAbsBaselineChange_T1toT3 > 1   ~ "> 1",
+                                              avgAbsBaselineChange_T1toT3 > 0.5 ~ "(0.5,1]",
+                                              TRUE                              ~ "< 0.5"),
+         avgAbsBaselineChange_cat = factor(avgAbsBaselineChange_cat, levels = c("< 0.5", "(0.5,1]", "> 1")))
+```
+
+The left plots of the following figures visualize the intra-personal baseline variation, for comparison.
+Intra-personal baseline variation, based on taking the average of the absolute differences in the x- and y-coordinates
+between timepoints T1 and T3.
+We focus on T1 and T3 since people at these both timepoints had similar dietary restrictions.
+T5 didn't have these restrictions and this fact alone would influence the difference to T1 / T3.
+
+
+## Whole sample
+
+### ... against gender
+
+```{r}
+#| columng: page
+#| fig-width: 12
+
+gg_baseline <- dat_catVar %>% 
+  ggplot(aes(x = gender, fill = avgAbsBaselineChange_cat)) +
+  geom_bar(position = "fill") +
+  scale_fill_brewer(palette = "Blues") +
+  ggtitle("Average absolute baseline variation (T1 vs. T3)")
+
+gg_gender <- dat_catVar %>% 
+  ggplot(aes(x = gender, fill = UMAPvar_cat)) +
+  geom_bar(position = "fill") +
+  scale_fill_brewer(palette = "Blues") +
+  facet_wrap(~ intervention)
+
+(gg_baseline + theme(legend.position = "none")) + gg_gender
+```
+
+
+### ... against age
+
+```{r}
+#| columng: page
+#| fig-width: 12
+
+gg_baseline <- dat_catVar %>% 
+  mutate(age_cat = cut(age, breaks = seq(10, 70, by = 10))) %>% 
+  ggplot(aes(x = age_cat, fill = avgAbsBaselineChange_cat)) +
+  geom_bar(position = "fill") +
+  scale_fill_brewer(palette = "Blues") +
+  ggtitle("Average absolute baseline variation (T1 vs. T3)")
+
+gg_age <- dat_catVar %>% 
+  mutate(age_cat = cut(age, breaks = seq(10, 70, by = 10))) %>% 
+  ggplot(aes(x = age_cat, fill = UMAPvar_cat)) +
+  geom_bar(position = "fill") +
+  scale_fill_brewer(palette = "Blues") +
+  facet_wrap(~ intervention)
+
+(gg_baseline + theme(legend.position = "none")) + gg_age
+```
+
+### ... against BMI
+
+```{r}
+#| columng: page
+#| fig-width: 12
+
+gg_baseline <- dat_catVar %>% 
+  mutate(bmi_cat = cut(bmi_t0, breaks = c(18,25,31))) %>% 
+  ggplot(aes(x = bmi_cat, fill = avgAbsBaselineChange_cat)) +
+  geom_bar(position = "fill") +
+  scale_fill_brewer(palette = "Blues") +
+  ggtitle("Average absolute baseline variation (T1 vs. T3)")
+
+gg_bmi <- dat_catVar %>% 
+  mutate(bmi_cat = cut(bmi_t0, breaks = c(18,25,31))) %>% 
+  ggplot(aes(x = bmi_cat, fill = UMAPvar_cat)) +
+  geom_bar(position = "fill") +
+  scale_fill_brewer(palette = "Blues") +
+  facet_wrap(~ intervention)
+
+(gg_baseline + theme(legend.position = "none")) + gg_bmi
+```
+
+
+### ... against vegetarian diet
+
+```{r}
+#| columng: page
+#| fig-width: 12
+
+gg_baseline <- dat_catVar %>% 
+  ggplot(aes(x = diet_veggie, fill = avgAbsBaselineChange_cat)) +
+  geom_bar(position = "fill") +
+  scale_fill_brewer(palette = "Blues") +
+  ggtitle("Average absolute baseline variation (T1 vs. T3)")
+
+gg_veggie <- dat_catVar %>% 
+  ggplot(aes(x = diet_veggie, fill = UMAPvar_cat)) +
+  geom_bar(position = "fill") +
+  scale_fill_brewer(palette = "Blues") +
+  facet_wrap(~ intervention)
+
+(gg_baseline + theme(legend.position = "none")) + gg_veggie
+```
+
+
+### ... against Shannon diversity
+
+```{r}
+#| columng: page
+#| fig-width: 12
+
+gg_baseline <- dat_catVar %>% 
+  mutate(div_cat = cut(diversity_shannon, breaks = seq(1, 4.5, by = .5))) %>% 
+  ggplot(aes(x = div_cat, fill = avgAbsBaselineChange_cat)) +
+  geom_bar(position = "fill") +
+  scale_fill_brewer(palette = "Blues") +
+  ggtitle("Average absolute baseline variation (T1 vs. T3)")
+
+gg_Sdiv <- dat_catVar %>% 
+  mutate(div_cat = cut(diversity_shannon, breaks = seq(1, 4.5, by = .5))) %>% 
+  ggplot(aes(x = div_cat, fill = UMAPvar_cat)) +
+  geom_bar(position = "fill") +
+  scale_fill_brewer(palette = "Blues") +
+  facet_wrap(~ intervention)
+
+(gg_baseline + theme(legend.position = "none")) + gg_Sdiv
+```
+
+### ... against inv. Simpson diversity
+
+```{r}
+#| columng: page
+#| fig-width: 12
+
+gg_baseline <- dat_catVar %>% 
+  mutate(div_cat = cut(diversity_invSimpson, breaks = c(0, 20, 30, 40, 55))) %>% 
+  ggplot(aes(x = div_cat, fill = avgAbsBaselineChange_cat)) +
+  geom_bar(position = "fill") +
+  scale_fill_brewer(palette = "Blues") +
+  ggtitle("Average absolute baseline variation (T1 vs. T3)")
+
+gg_iSdiv <- dat_catVar %>% 
+  mutate(div_cat = cut(diversity_invSimpson, breaks = c(0, 20, 30, 40, 55))) %>% 
+  ggplot(aes(x = div_cat, fill = UMAPvar_cat)) +
+  geom_bar(position = "fill") +
+  scale_fill_brewer(palette = "Blues") +
+  facet_wrap(~ intervention)
+
+(gg_baseline + theme(legend.position = "none")) + gg_iSdiv
+```
+
+
+### ... against the dominant species
+
+```{r}
+#| columng: page
+#| fig-width: 12
+
+gg_baseline <- dat_catVar %>% 
+  mutate(domSpec_cat = case_when(dominant_species %in% names(tab_domSpec)[1:16] ~ dominant_species,
+                                 TRUE ~ "others"),
+         domSpec_cat = factor(domSpec_cat, levels = c(names(tab_domSpec)[1:16], "others"))) %>% 
+  ggplot(aes(x = domSpec_cat, fill = avgAbsBaselineChange_cat)) +
+  geom_bar(position = "fill") +
+  scale_fill_brewer(palette = "Blues") +
+  ggtitle("Average absolute baseline variation (T1 vs. T3)") +
+  theme(axis.text.x = element_text(hjust = 1, angle = 45))
+
+gg_domSp <- dat_catVar %>% 
+  mutate(domSpec_cat = case_when(dominant_species %in% names(tab_domSpec)[1:16] ~ dominant_species,
+                                 TRUE ~ "others"),
+         domSpec_cat = factor(domSpec_cat, levels = c(names(tab_domSpec)[1:16], "others"))) %>% 
+  ggplot(aes(x = domSpec_cat, fill = UMAPvar_cat)) +
+  geom_bar(position = "fill") +
+  scale_fill_brewer(palette = "Blues") +
+  facet_wrap(~ intervention) +
+  theme(axis.text.x = element_text(hjust = 1, angle = 45))
+
+(gg_baseline + theme(legend.position = "none")) + gg_domSp
+```
+
+
+### ... against the UMAP coordinates
+
+```{r}
+#| columng: page
+#| fig-width: 12
+
+# prepare the data
+dat_UMAPplot <- dat_catVar %>% 
+  dplyr::rename(timepoint_2 = timepoint) %>%
+  mutate(timepoint_1 = sapply(parameter, function(x) { strsplit(x, split = "\\_")[[1]][2] %>% substr(1,2) })) %>% 
+  dplyr::left_join(dat_UMAP %>% select(participant_id, timepoint, UMAP1, UMAP2),
+                   by = c("participant_id" = "participant_id", "timepoint_1" = "timepoint")) %>% 
+  dplyr::rename(UMAP1_tp1 = UMAP1,
+                UMAP2_tp1 = UMAP2) %>% 
+  dplyr::left_join(dat_UMAP %>% select(participant_id, timepoint, UMAP1, UMAP2),
+                   by = c("participant_id" = "participant_id", "timepoint_2" = "timepoint")) %>% 
+  dplyr::rename(UMAP1_tp2 = UMAP1,
+                UMAP2_tp2 = UMAP2)
+
+# UMAP plot
+ggplot(dat_UMAPplot) +
+  geom_segment(aes(x = UMAP1_tp1, y = UMAP2_tp1, xend = UMAP1_tp2, yend = UMAP2_tp2, col = UMAPvar_cat)) +
+  geom_point(aes(x = UMAP1_tp1, y = UMAP2_tp1, col = UMAPvar_cat), pch = 1) +
+  geom_point(aes(x = UMAP1_tp2, y = UMAP2_tp2, col = UMAPvar_cat)) +
+  scale_color_brewer(palette = "Blues") +
+  facet_wrap(~ intervention) +
+  ggtitle("low / mid / high UMAP variation", subtitle = "only T1->T2 and T3->T4 points are shown, from empty to full circle")
+```
+
+
+##### UMAP with personal polygons
+
+```{r}
+#| column: page
+#| fig-width: 12
+#| fig-height: 8
+
+# extract the people with high variability
+participants_highVarAfterFresh <- dat_catVar %>% 
+  filter(intervention == "Fresh",
+         UMAPvar_cat  == "high") %>% 
+  pull(participant_id) %>% 
+  as.character()
+participants_highVarAfterPast <- dat_catVar %>% 
+  filter(intervention == "Pasteurized",
+         UMAPvar_cat  == "high") %>% 
+  pull(participant_id) %>% 
+  as.character()
+
+# only focus on the most dominant species
+tab_domSpec <- dat$dominant_species %>% table() %>% sort(decreasing = TRUE)
+
+# UMAP plot fresh
+dat_UMAP %>% 
+  mutate(participant_highFreshEffect = case_when(participant_id %in% participants_highVarAfterFresh ~ "yes",
+                                                 TRUE ~ "no"),
+         participant_highFreshEffect = factor(participant_highFreshEffect),
+         domSpec = case_when(dominant_species %in% names(tab_domSpec)[1:8] ~ dominant_species,
+                             TRUE ~ "other"),
+         domSpec = factor(domSpec, levels = c(names(tab_domSpec)[1:8], "other"))) %>% 
+  ggplot(aes(x = UMAP1, y = UMAP2)) +
+  geom_polygon(aes(group = participant_id), alpha = 0.2) +
+  geom_point(aes(col = domSpec)) +
+  facet_wrap(~ participant_highFreshEffect) +
+  ggtitle("Polygon plot by the information if the fresh intervention\nlead to high variability ('yes') or not ('no')") +
+  theme(legend.position = "bottom")
+
+# UMAP plot pasteurized
+dat_UMAP %>% 
+  mutate(participant_highPastEffect = case_when(participant_id %in% participants_highVarAfterPast ~ "yes",
+                                                TRUE ~ "no"),
+         participant_highPastEffect = factor(participant_highPastEffect),
+         domSpec = case_when(dominant_species %in% names(tab_domSpec)[1:8] ~ dominant_species,
+                             TRUE ~ "other"),
+         domSpec = factor(domSpec, levels = c(names(tab_domSpec)[1:8], "other"))) %>% 
+  ggplot(aes(x = UMAP1, y = UMAP2)) +
+  geom_point(aes(col = domSpec)) +
+  geom_polygon(aes(group = participant_id), alpha = 0.2) +
+  facet_wrap(~ participant_highPastEffect) +
+  ggtitle("Polygon plot by the information if the pasteurized intervention\nlead to high variability ('yes') or not ('no')") +
+  theme(legend.position = "bottom")
+```
+
+
+
+
+## For low/mid/high baseline var. subsamples
+
+Repeat some of the above analyses, additionally differentiating between people with a low (0-0.5) / mid (0.5-1) / high (>1) average absolute baseline variation (T1 vs. T3).
+
+```{r}
+dat_catVar <- dat_catVar %>% 
+  mutate(baseline_var = case_when(avgAbsBaselineChange_T1toT3 < 0.5 ~ "low",
+                                  avgAbsBaselineChange_T1toT3 < 1   ~ "mid",
+                                  TRUE                              ~ "high"),
+         baseline_var = factor(baseline_var, levels = c("low", "mid", "high")))
+```
+
+### distribution of the baseline var. of the subsamples
+
+```{r}
+#| columng: page
+#| fig-width: 12
+
+dat_catVar %>% 
+  mutate(age_cat = cut(age, breaks = seq(10, 70, by = 10))) %>% 
+  ggplot(aes(x = age_cat, fill = avgAbsBaselineChange_cat)) +
+  geom_bar(position = "fill") +
+  scale_fill_brewer(palette = "Blues") +
+  facet_wrap(~ baseline_var) +
+  ggtitle("Average absolute baseline variation (T1 vs. T3)")
+```
+
+### ... against the baseline variation
+
+```{r}
+dat_catVar %>% 
+  ggplot(aes(x = baseline_var, fill = UMAPvar_cat)) +
+  geom_bar(position = "fill") +
+  scale_fill_brewer(palette = "Blues") +
+  facet_grid(cols = vars(intervention))
+```
+
+
+### ... against age
+
+```{r}
+#| columng: page
+#| fig-width: 12
+#| fig-height: 8
+
+dat_catVar %>% 
+  mutate(age_cat = cut(age, breaks = seq(10, 70, by = 10))) %>% 
+  ggplot(aes(x = age_cat, fill = UMAPvar_cat)) +
+  geom_bar(position = "fill") +
+  scale_fill_brewer(palette = "Blues") +
+  facet_grid(rows = vars(baseline_var), cols = vars(intervention))
+```
+
+
+### ... against vegetarian diet
+
+```{r}
+#| columng: page
+#| fig-width: 12
+#| fig-height: 8
+
+dat_catVar %>% 
+  ggplot(aes(x = diet_veggie, fill = UMAPvar_cat)) +
+  geom_bar(position = "fill") +
+  scale_fill_brewer(palette = "Blues") +
+  facet_grid(rows = vars(baseline_var), cols = vars(intervention))
+```
+
+
+### ... against daily fiber intake
+
+```{r}
+#| columng: page
+#| fig-width: 12
+#| fig-height: 8
+
+dat_catVar %>% 
+  mutate(dailyConsumption_fiber = cut(dailyConsumption_fiber, breaks = c(5, 28, 60))) %>% 
+  ggplot(aes(x = dailyConsumption_fiber, fill = UMAPvar_cat)) +
+  geom_bar(position = "fill") +
+  scale_fill_brewer(palette = "Blues") +
+  facet_grid(rows = vars(baseline_var), cols = vars(intervention))
+```
+
+
+### ... against daily fat intake
+
+```{r}
+#| columng: page
+#| fig-width: 12
+#| fig-height: 8
+
+dat_catVar %>% 
+  mutate(dailyConsumption_fat = cut(dailyConsumption_fat, breaks = c(35, 100, 300))) %>% 
+  ggplot(aes(x = dailyConsumption_fat, fill = UMAPvar_cat)) +
+  geom_bar(position = "fill") +
+  scale_fill_brewer(palette = "Blues") +
+  facet_grid(rows = vars(baseline_var), cols = vars(intervention))
+```
+
+
+### ... against daily fiber intake
+
+```{r}
+#| columng: page
+#| fig-width: 12
+#| fig-height: 8
+
+dat_catVar %>% 
+  mutate(dailyConsumption_water = cut(dailyConsumption_water, breaks = c(1500, 3000, 6000))) %>% 
+  ggplot(aes(x = dailyConsumption_water, fill = UMAPvar_cat)) +
+  geom_bar(position = "fill") +
+  scale_fill_brewer(palette = "Blues") +
+  facet_grid(rows = vars(baseline_var), cols = vars(intervention))
+```
+
+
+### ... against Shannon diversity
+
+```{r}
+#| columng: page
+#| fig-width: 12
+#| fig-height: 8
+
+dat_catVar %>% 
+  mutate(div_cat = cut(diversity_shannon, breaks = seq(1, 4.5, by = .5))) %>% 
+  ggplot(aes(x = div_cat, fill = UMAPvar_cat)) +
+  geom_bar(position = "fill") +
+  scale_fill_brewer(palette = "Blues") +
+  facet_grid(rows = vars(baseline_var), cols = vars(intervention))
+```
+
+### ... against inv. Simpson diversity
+
+```{r}
+#| columng: page
+#| fig-width: 12
+#| fig-height: 8
+
+dat_catVar %>% 
+  mutate(div_cat = cut(diversity_invSimpson, breaks = c(0, 20, 30, 40, 55))) %>% 
+  ggplot(aes(x = div_cat, fill = UMAPvar_cat)) +
+  geom_bar(position = "fill") +
+  scale_fill_brewer(palette = "Blues") +
+  facet_grid(rows = vars(baseline_var), cols = vars(intervention))
+```
+
+
+### ... against the UMAP coordinates
+
+```{r}
+#| columng: page
+#| fig-width: 12
+#| fig-height: 8
+
+# prepare the data
+dat_UMAPplot <- dat_catVar %>% 
+  dplyr::rename(timepoint_2 = timepoint) %>%
+  mutate(timepoint_1 = sapply(parameter, function(x) { strsplit(x, split = "\\_")[[1]][2] %>% substr(1,2) })) %>% 
+  dplyr::left_join(dat_UMAP %>% select(participant_id, timepoint, UMAP1, UMAP2),
+                   by = c("participant_id" = "participant_id", "timepoint_1" = "timepoint")) %>% 
+  dplyr::rename(UMAP1_tp1 = UMAP1,
+                UMAP2_tp1 = UMAP2) %>% 
+  dplyr::left_join(dat_UMAP %>% select(participant_id, timepoint, UMAP1, UMAP2),
+                   by = c("participant_id" = "participant_id", "timepoint_2" = "timepoint")) %>% 
+  dplyr::rename(UMAP1_tp2 = UMAP1,
+                UMAP2_tp2 = UMAP2)
+
+# UMAP plot
+ggplot(dat_UMAPplot) +
+  geom_segment(aes(x = UMAP1_tp1, y = UMAP2_tp1, xend = UMAP1_tp2, yend = UMAP2_tp2, col = UMAPvar_cat)) +
+  geom_point(aes(x = UMAP1_tp1, y = UMAP2_tp1, col = UMAPvar_cat), pch = 1) +
+  geom_point(aes(x = UMAP1_tp2, y = UMAP2_tp2, col = UMAPvar_cat)) +
+  scale_color_brewer(palette = "Blues") +
+  facet_grid(rows = vars(baseline_var), cols = vars(intervention)) +
+  ggtitle("low / mid / high UMAP variation", subtitle = "only T1->T2 and T3->T4 points are shown, from empty to full circle")
+```

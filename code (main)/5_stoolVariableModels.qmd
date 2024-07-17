@@ -1,0 +1,794 @@
+---
+title: "Description Stool Sample Taxonomy"
+format:
+  html:
+    toc: true
+    code-fold: true
+    self-contained: true
+---
+
+## Data preparation
+
+```{r packages}
+#| warning: false
+
+library(sauerkrautTaxonomyBuddy)
+library(SummarizedExperiment) # microbiome analysis
+library(mia)                  # microbiome analysis
+library(vegan)                # (dis)similarity measures
+
+library(dplyr)      # data handling
+library(tidyr)      # data transformation
+library(ggplot2)    # data visualization
+library(patchwork)  # joint ggplots
+library(kableExtra) # table printing
+
+library(mgcv)       # GAM estimation
+
+# set ggplot2 theme
+theme_set(
+  theme_minimal() +
+    theme(plot.title       = element_text(hjust = 0.5),
+          plot.subtitle    = element_text(hjust = 0.5),
+          panel.grid.minor = element_blank(),
+          plot.background  = element_rect(fill = "white", color = "white"))
+)
+```
+
+```{r set file paths}
+define_dataPaths()
+```
+
+```{r data preparation}
+#| warning: false
+
+tse <- readAndPrepare_mainTaxonomicData(path_groupInfoRdata               = path_groupInfoRdata,
+                                        path_participantRdata             = path_participantRdata,
+                                        path_samplesIDxlsx                = path_samplesIDxlsx,
+                                        path_dietInfoCsv                  = path_dietInfoCsv,
+                                        path_nutrientInfoCsv              = path_nutrientInfoCsv,
+                                        path_bloodMetabolomeXlsx          = path_bloodMetabolomeXlsx,
+                                        path_stoolMetabolomeXlsx          = path_stoolMetabolomeXlsx,
+                                        path_T4questXlsx                  = path_T4questXlsx,
+                                        path_stoolInfoXlsx                = path_stoolInfoXlsx,
+                                        path_bodyMeasuresXlsx             = path_bodyMeasuresXlsx,
+                                        path_absTaxonomyData              = path_absTaxonomyData,
+                                        path_relTaxonomyData              = path_relTaxonomyData,
+                                        path_sampleLookupXlsx             = path_sampleLookupXlsx,
+                                        path_krautLookupXlsx              = path_krautLookupXlsx,
+                                        path_bloodMarkerBostonRdata       = path_bloodMarkerBostonRdata,
+                                        path_bloodMarkerZentrallaborRdata = path_bloodMarkerZentrallaborRdata,
+                                        path_bloodMarkerBostonXlsx        = path_bloodMarkerBostonXlsx,
+                                        path_bloodMarkerZentrallaborXlsx  = path_bloodMarkerZentrallaborXlsx,
+                                        aggregation_level                 = "species",
+                                        exclude_sickParticipants          = "stool type analysis")
+
+dat <- tse %>% colData() %>% as.data.frame()
+```
+
+```{r compute experiment variables}
+# remove follow-up measurements
+dat_model <- dat %>% 
+  filter(intervention != "FollowUp") %>% 
+  mutate(timepoint    = droplevels(timepoint),
+         period       = droplevels(period),
+         intervention = droplevels(intervention))
+
+# construct the intervention variable and the carry-over variable
+dat_model <- dat_model %>% 
+  mutate(intervention = case_when(treatment == "Baseline" ~ "Baseline",
+                                  TRUE                    ~ intervention),
+         carry_over   = case_when(timepoint %in% c("T1", "T2") ~ "not possible (T1, T2)",
+                                  group == "Fresh first"       ~ "from fresh intervention",
+                                  group == "Pasteurized first" ~ "from pasteurized intervention"),
+         carry_over   = factor(carry_over, levels = c("not possible (T1, T2)", "from fresh intervention", "from pasteurized intervention")),
+         phase        = case_when(timepoint %in% c("T3","T4") ~ "phase 2",
+                                  TRUE                        ~ "phase 1"),
+         phase        = factor(phase))
+
+# categorize the age and bmi variables for testing category-specific intervention effects
+dat_model <- dat_model %>% 
+  mutate(age_centered50 = age - 50,
+         bmi_centered25 = bmi_t0 - 25,
+         age_cat = case_when(age < 50 ~ paste0(min(age), "-49"),
+                             TRUE     ~ paste0("50-", max(age))),
+         age_cat = factor(age_cat),
+         bmi_cat = case_when(bmi_t0 < 25 ~ paste0("[", floor(min(bmi_t0)), ", 25)"),
+                             TRUE        ~ paste0("[25, ", ceiling(max(bmi_t0)), "]")),
+         bmi_cat = factor(bmi_cat))
+```
+
+
+# Regression models
+
+All following models estimate the intervention effects on the stool variables,
+based on linear mixed regression models (with the same structure as in the main models for the taxonomic paper).  
+Additionally to the overall models one model each is estimated for evaluating strata-specific intervention effects,
+between the two (1) genders, (2) age groups, and (3) BMI groups.
+
+```{r}
+# estimate a regression model with mgcv
+estimate_model <- function(dat, y, family = gaussian(), transformation = identity, interaction_string = "", estimation_method = "REML") {
+  
+  dat[[y]] <- dat[[y]] %>% transformation()
+  
+  covar_string <- paste0("~ intervention +",
+                         ifelse(interaction_string == "", "", paste(interaction_string, "+")),
+                         "phase + gender + age_centered50 + bmi_centered25 + s(participant_id, bs = 're')")
+  
+  paste(y, covar_string) %>% formula() %>% 
+    gam(method = estimation_method, data = dat, family = family)
+}
+
+
+# create a standard residual plot
+plot_residuals <- function(gam_model, title = "") {
+  
+  plot_dat <- data.frame(predictions = gam_model$fitted.values,
+                         residuals   = gam_model$residuals)
+  
+  ggplot(plot_dat, aes(x = predictions, y = residuals)) +
+    geom_hline(yintercept = 0, col = "firebrick", lty = 2) +
+    geom_point() +
+    geom_smooth(se = FALSE) +
+    ylim(c(-1,1) * max(abs(plot_dat$residuals))) +
+    ggtitle(title)
+}
+```
+
+## Models on stool type
+
+##### Overall model
+
+```{r}
+#| message: false
+#| fig-width: 10
+#| fig-height: 4
+
+# estimate models
+m_st <- estimate_model(dat_model, y = "stool_type")
+# m_st2 <- estimate_model(dat_model, y = "stool_type", transformation = log)
+m_st3 <- estimate_model(dat_model, y = "stool_type", family = Gamma(link = "log"))
+
+
+# plot residuals
+plot_residuals(m_st, title = paste0("Gaussian model\nExplained deviance: ", 100*round(summary(m_st)$dev.expl, 2), "%")) +
+  plot_residuals(m_st3, title = paste0("Gamma model\nExplained deviance: ", 100*round(summary(m_st3)$dev.expl, 2), "%"))
+
+# print intervention effects of final model
+summary(m_st)$p.table %>% 
+  as.data.frame() %>% 
+  filter(grepl("intervention", row.names(.))) %>% 
+  dplyr::rename(estimate = "Estimate",
+                sd_error = "Std. Error",
+                tvalue   = "t value",
+                pvalue   = "Pr(>|t|)") %>% 
+  mutate(CIlower  = estimate - qnorm(0.975)*sd_error,
+         CIupper  = estimate + qnorm(0.975)*sd_error,
+         estimate = round(estimate, 2),
+         CIlower  = round(CIlower, 2),
+         CIupper  = round(CIupper, 2),
+         pvalue   = round(pvalue, 4)) %>% 
+  select(estimate, CIlower, CIupper, pvalue) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+##### Gender-stratified model
+
+Intervention effects for males:
+
+```{r}
+# estimate model
+m_st_sexInt <- estimate_model(dat_model, y = "stool_type", interaction_string = "intervention:gender")
+
+# print intervention effects for males
+summary(m_st_sexInt)$p.table %>% 
+  as.data.frame() %>% 
+  filter(grepl("intervention", row.names(.)),
+         !grepl("gender", row.names(.))) %>% 
+  dplyr::rename(estimate = "Estimate",
+                sd_error = "Std. Error",
+                tvalue   = "t value",
+                pvalue   = "Pr(>|t|)") %>% 
+  mutate(CIlower  = estimate - qnorm(0.975)*sd_error,
+         CIupper  = estimate + qnorm(0.975)*sd_error,
+         estimate = round(estimate, 2),
+         CIlower  = round(CIlower, 2),
+         CIupper  = round(CIupper, 2),
+         pvalue   = round(pvalue, 4)) %>% 
+  select(estimate, CIlower, CIupper, pvalue) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+Intervention effects for females:
+
+```{r}
+# estimate model
+m_st_sexInt_changedRef <- dat_model %>% 
+  mutate(gender = relevel(gender, ref = "W")) %>% 
+  estimate_model(dat = ., y = "stool_type", interaction_string = "intervention:gender")
+
+# print intervention effects for females
+summary(m_st_sexInt_changedRef)$p.table %>% 
+  as.data.frame() %>% 
+  filter(grepl("intervention", row.names(.)),
+         !grepl("gender", row.names(.))) %>% 
+  dplyr::rename(estimate = "Estimate",
+                sd_error = "Std. Error",
+                tvalue   = "t value",
+                pvalue   = "Pr(>|t|)") %>% 
+  mutate(CIlower  = estimate - qnorm(0.975)*sd_error,
+         CIupper  = estimate + qnorm(0.975)*sd_error,
+         estimate = round(estimate, 2),
+         CIlower  = round(CIlower, 2),
+         CIupper  = round(CIupper, 2),
+         pvalue   = round(pvalue, 4)) %>% 
+  select(estimate, CIlower, CIupper, pvalue) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+
+##### Age-stratified model
+
+Intervention effects for younger people:
+
+```{r}
+# estimate model
+m_st_ageInt <- estimate_model(dat_model, y = "stool_type", interaction_string = "intervention:age_cat")
+
+# print intervention effects for younger people
+summary(m_st_ageInt)$p.table %>% 
+  as.data.frame() %>% 
+  filter(grepl("intervention", row.names(.)),
+         !grepl("age_cat", row.names(.))) %>% 
+  dplyr::rename(estimate = "Estimate",
+                sd_error = "Std. Error",
+                tvalue   = "t value",
+                pvalue   = "Pr(>|t|)") %>% 
+  mutate(CIlower  = estimate - qnorm(0.975)*sd_error,
+         CIupper  = estimate + qnorm(0.975)*sd_error,
+         estimate = round(estimate, 2),
+         CIlower  = round(CIlower, 2),
+         CIupper  = round(CIupper, 2),
+         pvalue   = round(pvalue, 4)) %>% 
+  select(estimate, CIlower, CIupper, pvalue) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+Intervention effects for older people:
+
+```{r}
+# estimate model
+m_st_ageInt_changedRef <- dat_model %>% 
+  mutate(age_cat = relevel(age_cat, ref = "50-69")) %>% 
+  estimate_model(dat = ., y = "stool_type", interaction_string = "intervention:age_cat")
+
+# print intervention effects for older people
+summary(m_st_ageInt_changedRef)$p.table %>% 
+  as.data.frame() %>% 
+  filter(grepl("intervention", row.names(.)),
+         !grepl("age_cat", row.names(.))) %>% 
+  dplyr::rename(estimate = "Estimate",
+                sd_error = "Std. Error",
+                tvalue   = "t value",
+                pvalue   = "Pr(>|t|)") %>% 
+  mutate(CIlower  = estimate - qnorm(0.975)*sd_error,
+         CIupper  = estimate + qnorm(0.975)*sd_error,
+         estimate = round(estimate, 2),
+         CIlower  = round(CIlower, 2),
+         CIupper  = round(CIupper, 2),
+         pvalue   = round(pvalue, 4)) %>% 
+  select(estimate, CIlower, CIupper, pvalue) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+
+##### BMI-stratified model
+
+Intervention effects for low-BMI people:
+
+```{r}
+# estimate model
+m_st_bmiInt <- estimate_model(dat_model, y = "stool_type", interaction_string = "intervention:bmi_cat")
+
+# print intervention effects for low-BMI people
+summary(m_st_bmiInt)$p.table %>% 
+  as.data.frame() %>% 
+  filter(grepl("intervention", row.names(.)),
+         !grepl("bmi_cat", row.names(.))) %>% 
+  dplyr::rename(estimate = "Estimate",
+                sd_error = "Std. Error",
+                tvalue   = "t value",
+                pvalue   = "Pr(>|t|)") %>% 
+  mutate(CIlower  = estimate - qnorm(0.975)*sd_error,
+         CIupper  = estimate + qnorm(0.975)*sd_error,
+         estimate = round(estimate, 2),
+         CIlower  = round(CIlower, 2),
+         CIupper  = round(CIupper, 2),
+         pvalue   = round(pvalue, 4)) %>% 
+  select(estimate, CIlower, CIupper, pvalue) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+Intervention effects for high-BMI people:
+
+```{r}
+# estimate model
+m_st_bmiInt_changedRef <- dat_model %>% 
+  mutate(bmi_cat = relevel(bmi_cat, ref = "[25, 31]")) %>% 
+  estimate_model(dat = ., y = "stool_type", interaction_string = "intervention:bmi_cat")
+
+# print intervention effects for high-BMI people
+summary(m_st_bmiInt_changedRef)$p.table %>% 
+  as.data.frame() %>% 
+  filter(grepl("intervention", row.names(.)),
+         !grepl("bmi_cat", row.names(.))) %>% 
+  dplyr::rename(estimate = "Estimate",
+                sd_error = "Std. Error",
+                tvalue   = "t value",
+                pvalue   = "Pr(>|t|)") %>% 
+  mutate(CIlower  = estimate - qnorm(0.975)*sd_error,
+         CIupper  = estimate + qnorm(0.975)*sd_error,
+         estimate = round(estimate, 2),
+         CIlower  = round(CIlower, 2),
+         CIupper  = round(CIupper, 2),
+         pvalue   = round(pvalue, 4)) %>% 
+  select(estimate, CIlower, CIupper, pvalue) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+
+
+## Models on PH value
+
+##### Overall model
+
+```{r}
+#| message: false
+#| fig-width: 10
+#| fig-height: 4
+
+# estimate models
+m_ph <- estimate_model(dat_model, y = "ph_value")
+m_ph2 <- estimate_model(dat_model, y = "ph_value", family = Gamma(link = "log"))
+
+
+# plot residuals
+plot_residuals(m_ph, title = paste0("Gaussian model\nExplained deviance: ", 100*round(summary(m_st)$dev.expl, 2), "%")) +
+  plot_residuals(m_ph2, title = paste0("Gamma model\nExplained deviance: ", 100*round(summary(m_st3)$dev.expl, 2), "%"))
+
+# print intervention effects of final model
+summary(m_ph)$p.table %>% 
+  as.data.frame() %>% 
+  filter(grepl("intervention", row.names(.))) %>% 
+  dplyr::rename(estimate = "Estimate",
+                sd_error = "Std. Error",
+                tvalue   = "t value",
+                pvalue   = "Pr(>|t|)") %>% 
+  mutate(CIlower  = estimate - qnorm(0.975)*sd_error,
+         CIupper  = estimate + qnorm(0.975)*sd_error,
+         estimate = round(estimate, 2),
+         CIlower  = round(CIlower, 2),
+         CIupper  = round(CIupper, 2),
+         pvalue   = round(pvalue, 4)) %>% 
+  select(estimate, CIlower, CIupper, pvalue) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+##### Gender-stratified model
+
+Intervention effects for males:
+
+```{r}
+# estimate model
+m_ph_sexInt <- estimate_model(dat_model, y = "ph_value", interaction_string = "intervention:gender")
+
+# print intervention effects for males
+summary(m_ph_sexInt)$p.table %>% 
+  as.data.frame() %>% 
+  filter(grepl("intervention", row.names(.)),
+         !grepl("gender", row.names(.))) %>% 
+  dplyr::rename(estimate = "Estimate",
+                sd_error = "Std. Error",
+                tvalue   = "t value",
+                pvalue   = "Pr(>|t|)") %>% 
+  mutate(CIlower  = estimate - qnorm(0.975)*sd_error,
+         CIupper  = estimate + qnorm(0.975)*sd_error,
+         estimate = round(estimate, 2),
+         CIlower  = round(CIlower, 2),
+         CIupper  = round(CIupper, 2),
+         pvalue   = round(pvalue, 4)) %>% 
+  select(estimate, CIlower, CIupper, pvalue) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+Intervention effects for females:
+
+```{r}
+# estimate model
+m_ph_sexInt_changedRef <- dat_model %>% 
+  mutate(gender = relevel(gender, ref = "W")) %>% 
+  estimate_model(dat = ., y = "ph_value", interaction_string = "intervention:gender")
+
+# print intervention effects for females
+summary(m_ph_sexInt_changedRef)$p.table %>% 
+  as.data.frame() %>% 
+  filter(grepl("intervention", row.names(.)),
+         !grepl("gender", row.names(.))) %>% 
+  dplyr::rename(estimate = "Estimate",
+                sd_error = "Std. Error",
+                tvalue   = "t value",
+                pvalue   = "Pr(>|t|)") %>% 
+  mutate(CIlower  = estimate - qnorm(0.975)*sd_error,
+         CIupper  = estimate + qnorm(0.975)*sd_error,
+         estimate = round(estimate, 2),
+         CIlower  = round(CIlower, 2),
+         CIupper  = round(CIupper, 2),
+         pvalue   = round(pvalue, 4)) %>% 
+  select(estimate, CIlower, CIupper, pvalue) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+
+##### Age-stratified model
+
+Intervention effects for younger people:
+
+```{r}
+# estimate model
+m_ph_ageInt <- estimate_model(dat_model, y = "ph_value", interaction_string = "intervention:age_cat")
+
+# print intervention effects for younger people
+summary(m_ph_ageInt)$p.table %>% 
+  as.data.frame() %>% 
+  filter(grepl("intervention", row.names(.)),
+         !grepl("age_cat", row.names(.))) %>% 
+  dplyr::rename(estimate = "Estimate",
+                sd_error = "Std. Error",
+                tvalue   = "t value",
+                pvalue   = "Pr(>|t|)") %>% 
+  mutate(CIlower  = estimate - qnorm(0.975)*sd_error,
+         CIupper  = estimate + qnorm(0.975)*sd_error,
+         estimate = round(estimate, 2),
+         CIlower  = round(CIlower, 2),
+         CIupper  = round(CIupper, 2),
+         pvalue   = round(pvalue, 4)) %>% 
+  select(estimate, CIlower, CIupper, pvalue) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+Intervention effects for older people:
+
+```{r}
+# estimate model
+m_ph_ageInt_changedRef <- dat_model %>% 
+  mutate(age_cat = relevel(age_cat, ref = "50-69")) %>% 
+  estimate_model(dat = ., y = "ph_value", interaction_string = "intervention:age_cat")
+
+# print intervention effects for older people
+summary(m_ph_ageInt_changedRef)$p.table %>% 
+  as.data.frame() %>% 
+  filter(grepl("intervention", row.names(.)),
+         !grepl("age_cat", row.names(.))) %>% 
+  dplyr::rename(estimate = "Estimate",
+                sd_error = "Std. Error",
+                tvalue   = "t value",
+                pvalue   = "Pr(>|t|)") %>% 
+  mutate(CIlower  = estimate - qnorm(0.975)*sd_error,
+         CIupper  = estimate + qnorm(0.975)*sd_error,
+         estimate = round(estimate, 2),
+         CIlower  = round(CIlower, 2),
+         CIupper  = round(CIupper, 2),
+         pvalue   = round(pvalue, 4)) %>% 
+  select(estimate, CIlower, CIupper, pvalue) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+
+##### BMI-stratified model
+
+Intervention effects for low-BMI people:
+
+```{r}
+# estimate model
+m_ph_bmiInt <- estimate_model(dat_model, y = "ph_value", interaction_string = "intervention:bmi_cat")
+
+# print intervention effects for low-BMI people
+summary(m_ph_bmiInt)$p.table %>% 
+  as.data.frame() %>% 
+  filter(grepl("intervention", row.names(.)),
+         !grepl("bmi_cat", row.names(.))) %>% 
+  dplyr::rename(estimate = "Estimate",
+                sd_error = "Std. Error",
+                tvalue   = "t value",
+                pvalue   = "Pr(>|t|)") %>% 
+  mutate(CIlower  = estimate - qnorm(0.975)*sd_error,
+         CIupper  = estimate + qnorm(0.975)*sd_error,
+         estimate = round(estimate, 2),
+         CIlower  = round(CIlower, 2),
+         CIupper  = round(CIupper, 2),
+         pvalue   = round(pvalue, 4)) %>% 
+  select(estimate, CIlower, CIupper, pvalue) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+Intervention effects for high-BMI people:
+
+```{r}
+# estimate model
+m_ph_bmiInt_changedRef <- dat_model %>% 
+  mutate(bmi_cat = relevel(bmi_cat, ref = "[25, 31]")) %>% 
+  estimate_model(dat = ., y = "ph_value", interaction_string = "intervention:bmi_cat")
+
+# print intervention effects for high-BMI people
+summary(m_ph_bmiInt_changedRef)$p.table %>% 
+  as.data.frame() %>% 
+  filter(grepl("intervention", row.names(.)),
+         !grepl("bmi_cat", row.names(.))) %>% 
+  dplyr::rename(estimate = "Estimate",
+                sd_error = "Std. Error",
+                tvalue   = "t value",
+                pvalue   = "Pr(>|t|)") %>% 
+  mutate(CIlower  = estimate - qnorm(0.975)*sd_error,
+         CIupper  = estimate + qnorm(0.975)*sd_error,
+         estimate = round(estimate, 2),
+         CIlower  = round(CIlower, 2),
+         CIupper  = round(CIupper, 2),
+         pvalue   = round(pvalue, 4)) %>% 
+  select(estimate, CIlower, CIupper, pvalue) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+
+
+## Models on bowel movement frequency
+
+Analyze the logistic question whether bowel movement frequency is 'once daily or more often' vs. 'more rarely than once daily'.
+Positive effects in the following models encode a higher chance to have frequency 'once daily or more often'.
+
+```{r}
+dat_model <- dat_model %>% 
+  mutate(bowelMovement_freq_binary = case_when(is.na(bowelMovement_freq)             ~ NA_character_,
+                                               grepl("taeglich", bowelMovement_freq) ~ "once daily or more often",
+                                               TRUE                                  ~ "more rarely than once daily"),
+         bowelMovement_freq_binary = factor(bowelMovement_freq_binary,
+                                            levels = c("more rarely than once daily", "once daily or more often")))
+```
+
+##### Overall model
+
+```{r}
+#| message: false
+#| fig-width: 5
+#| fig-height: 4
+
+# estimate models
+m_bm <- estimate_model(dat_model, y = "bowelMovement_freq_binary", family = binomial(link = "logit"))
+
+
+# plot residuals
+plot_residuals(m_bm, title = paste0("Gaussian model\nExplained deviance: ", 100*round(summary(m_st)$dev.expl, 2), "%"))
+
+# print intervention effects of final model
+summary(m_bm)$p.table %>% 
+  as.data.frame() %>% 
+  filter(grepl("intervention", row.names(.))) %>% 
+  dplyr::rename(estimate = "Estimate",
+                sd_error = "Std. Error",
+                zvalue   = "z value",
+                pvalue   = "Pr(>|z|)") %>% 
+  mutate(CIlower      = estimate - qnorm(0.975)*sd_error,
+         CIupper      = estimate + qnorm(0.975)*sd_error,
+         exp_estimate = exp(estimate),
+         exp_CIlower  = exp(CIlower),
+         exp_CIupper  = exp(CIupper),
+         exp_estimate = round(exp_estimate, 2),
+         exp_CIlower  = round(exp_CIlower, 2),
+         exp_CIupper  = round(exp_CIupper, 2),
+         pvalue       = round(pvalue, 4)) %>% 
+  select(exp_estimate, exp_CIlower, exp_CIupper, pvalue) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+##### Gender-stratified model
+
+Intervention effects for males:
+
+```{r}
+# estimate model
+m_bm_sexInt <- estimate_model(dat_model, y = "bowelMovement_freq_binary", family = binomial(link = "logit"), interaction_string = "intervention:gender")
+
+# print intervention effects for males
+summary(m_bm_sexInt)$p.table %>% 
+  as.data.frame() %>% 
+  filter(grepl("intervention", row.names(.)),
+         !grepl("gender", row.names(.))) %>% 
+  dplyr::rename(estimate = "Estimate",
+                sd_error = "Std. Error",
+                zvalue   = "z value",
+                pvalue   = "Pr(>|z|)") %>% 
+  mutate(CIlower      = estimate - qnorm(0.975)*sd_error,
+         CIupper      = estimate + qnorm(0.975)*sd_error,
+         exp_estimate = exp(estimate),
+         exp_CIlower  = exp(CIlower),
+         exp_CIupper  = exp(CIupper),
+         exp_estimate = round(exp_estimate, 2),
+         exp_CIlower  = round(exp_CIlower, 2),
+         exp_CIupper  = round(exp_CIupper, 2),
+         pvalue       = round(pvalue, 4)) %>% 
+  select(exp_estimate, exp_CIlower, exp_CIupper, pvalue) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+Intervention effects for females:
+
+```{r}
+# estimate model
+m_bm_sexInt_changedRef <- dat_model %>% 
+  mutate(gender = relevel(gender, ref = "W")) %>% 
+  estimate_model(dat = ., y = "bowelMovement_freq_binary", family = binomial(link = "logit"), interaction_string = "intervention:gender")
+
+# print intervention effects for females
+summary(m_bm_sexInt_changedRef)$p.table %>% 
+  as.data.frame() %>% 
+  filter(grepl("intervention", row.names(.)),
+         !grepl("gender", row.names(.))) %>% 
+  dplyr::rename(estimate = "Estimate",
+                sd_error = "Std. Error",
+                zvalue   = "z value",
+                pvalue   = "Pr(>|z|)") %>% 
+  mutate(CIlower      = estimate - qnorm(0.975)*sd_error,
+         CIupper      = estimate + qnorm(0.975)*sd_error,
+         exp_estimate = exp(estimate),
+         exp_CIlower  = exp(CIlower),
+         exp_CIupper  = exp(CIupper),
+         exp_estimate = round(exp_estimate, 2),
+         exp_CIlower  = round(exp_CIlower, 2),
+         exp_CIupper  = round(exp_CIupper, 2),
+         pvalue       = round(pvalue, 4)) %>% 
+  select(exp_estimate, exp_CIlower, exp_CIupper, pvalue) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+
+##### Age-stratified model
+
+Intervention effects for younger people:
+
+```{r}
+# estimate model
+m_bm_ageInt <- estimate_model(dat_model, y = "bowelMovement_freq_binary", family = binomial(link = "logit"), interaction_string = "intervention:age_cat")
+
+# print intervention effects for younger people
+summary(m_bm_ageInt)$p.table %>% 
+  as.data.frame() %>% 
+  filter(grepl("intervention", row.names(.)),
+         !grepl("age_cat", row.names(.))) %>% 
+  dplyr::rename(estimate = "Estimate",
+                sd_error = "Std. Error",
+                zvalue   = "z value",
+                pvalue   = "Pr(>|z|)") %>% 
+  mutate(CIlower      = estimate - qnorm(0.975)*sd_error,
+         CIupper      = estimate + qnorm(0.975)*sd_error,
+         exp_estimate = exp(estimate),
+         exp_CIlower  = exp(CIlower),
+         exp_CIupper  = exp(CIupper),
+         exp_estimate = round(exp_estimate, 2),
+         exp_CIlower  = round(exp_CIlower, 2),
+         exp_CIupper  = round(exp_CIupper, 2),
+         pvalue       = round(pvalue, 4)) %>% 
+  select(exp_estimate, exp_CIlower, exp_CIupper, pvalue) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+Intervention effects for older people:
+
+```{r}
+# estimate model
+m_bm_ageInt_changedRef <- dat_model %>% 
+  mutate(age_cat = relevel(age_cat, ref = "50-69")) %>% 
+  estimate_model(dat = ., y = "bowelMovement_freq_binary", family = binomial(link = "logit"), interaction_string = "intervention:age_cat")
+
+# print intervention effects for older people
+summary(m_bm_ageInt_changedRef)$p.table %>% 
+  as.data.frame() %>% 
+  filter(grepl("intervention", row.names(.)),
+         !grepl("age_cat", row.names(.))) %>% 
+  dplyr::rename(estimate = "Estimate",
+                sd_error = "Std. Error",
+                zvalue   = "z value",
+                pvalue   = "Pr(>|z|)") %>% 
+  mutate(CIlower      = estimate - qnorm(0.975)*sd_error,
+         CIupper      = estimate + qnorm(0.975)*sd_error,
+         exp_estimate = exp(estimate),
+         exp_CIlower  = exp(CIlower),
+         exp_CIupper  = exp(CIupper),
+         exp_estimate = round(exp_estimate, 2),
+         exp_CIlower  = round(exp_CIlower, 2),
+         exp_CIupper  = round(exp_CIupper, 2),
+         pvalue       = round(pvalue, 4)) %>% 
+  select(exp_estimate, exp_CIlower, exp_CIupper, pvalue) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+
+##### BMI-stratified model
+
+Intervention effects for low-BMI people:
+
+```{r}
+# estimate model
+m_bm_bmiInt <- estimate_model(dat_model, y = "bowelMovement_freq_binary", family = binomial(link = "logit"), interaction_string = "intervention:bmi_cat")
+
+# print intervention effects for low-BMI people
+summary(m_bm_bmiInt)$p.table %>% 
+  as.data.frame() %>% 
+  filter(grepl("intervention", row.names(.)),
+         !grepl("bmi_cat", row.names(.))) %>% 
+  dplyr::rename(estimate = "Estimate",
+                sd_error = "Std. Error",
+                zvalue   = "z value",
+                pvalue   = "Pr(>|z|)") %>% 
+  mutate(CIlower      = estimate - qnorm(0.975)*sd_error,
+         CIupper      = estimate + qnorm(0.975)*sd_error,
+         exp_estimate = exp(estimate),
+         exp_CIlower  = exp(CIlower),
+         exp_CIupper  = exp(CIupper),
+         exp_estimate = round(exp_estimate, 2),
+         exp_CIlower  = round(exp_CIlower, 2),
+         exp_CIupper  = round(exp_CIupper, 2),
+         pvalue       = round(pvalue, 4)) %>% 
+  select(exp_estimate, exp_CIlower, exp_CIupper, pvalue) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+Intervention effects for high-BMI people:
+
+```{r}
+# estimate model
+m_bm_bmiInt_changedRef <- dat_model %>% 
+  mutate(bmi_cat = relevel(bmi_cat, ref = "[25, 31]")) %>% 
+  estimate_model(dat = ., y = "bowelMovement_freq_binary", family = binomial(link = "logit"), interaction_string = "intervention:bmi_cat")
+
+# print intervention effects for high-BMI people
+summary(m_bm_bmiInt_changedRef)$p.table %>% 
+  as.data.frame() %>% 
+  filter(grepl("intervention", row.names(.)),
+         !grepl("bmi_cat", row.names(.))) %>% 
+  dplyr::rename(estimate = "Estimate",
+                sd_error = "Std. Error",
+                zvalue   = "z value",
+                pvalue   = "Pr(>|z|)") %>% 
+  mutate(CIlower      = estimate - qnorm(0.975)*sd_error,
+         CIupper      = estimate + qnorm(0.975)*sd_error,
+         exp_estimate = exp(estimate),
+         exp_CIlower  = exp(CIlower),
+         exp_CIupper  = exp(CIupper),
+         exp_estimate = round(exp_estimate, 2),
+         exp_CIlower  = round(exp_CIlower, 2),
+         exp_CIupper  = round(exp_CIupper, 2),
+         pvalue       = round(pvalue, 4)) %>% 
+  select(exp_estimate, exp_CIlower, exp_CIupper, pvalue) %>% 
+  kable() %>% 
+  kable_styling()
+```

@@ -1,0 +1,1808 @@
+---
+title: "Sauerkraut study - Model-based Stool SCFA Analysis"
+format:
+  html:
+    toc: true
+    code-fold: true
+    embed-resources: true
+---
+
+```{r packages}
+#| warning: false
+
+library(sauerkrautTaxonomyBuddy)
+library(SummarizedExperiment) # microbiome analysis
+library(mia)                  # microbiome analysis
+library(mgcv)                 # mixed model estimation
+library(mgcViz)               # mgcv-based visualizations
+library(APCtools)             # mgcv-based tables and visualizations
+
+library(dplyr)      # data handling
+library(tidyr)      # data transformation
+library(ggplot2)    # data visualization
+library(patchwork)  # grid of ggplots
+library(kableExtra) # print tables
+
+# set ggplot2 theme
+theme_set(
+  theme_minimal() +
+    theme(plot.title       = element_text(hjust = 0.5),
+          plot.subtitle    = element_text(hjust = 0.5),
+          panel.grid.minor = element_blank(),
+          plot.background  = element_rect(fill = "white", color = "white"))
+)
+```
+
+# Methodology
+
+For each stool parameter, the below model is estimated in three variants, as described in the paper:
+
+- Gaussian regression model
+- Gaussian regression model with log transformation
+- Gamma regression model
+- sidenote: additionally, Gaussian with square root transformation was evaluated, but due to only small benefits regarding the models' goodness of fit, and the unintuitive interpretation we'd get from such a square root transformation, it was dropped
+
+Each of the above variants were estimated and the final model was chosen as the model with the highest share of explained deviance per stool parameter.
+
+For each parameter of interest, a separate linear mixed regression model is
+estimated.
+
+
+##### General notes
+
+- follow-up measurements were excluded before model estimation
+- internal note: nonlinear effects of age and BMI were evaluated for a lot of models, but did not lead to (structural) improvements of any of the models' predictive power. In most models, it didn't change the explained deviance share at all.
+- internal note: age-specific intervention effects were only evaluated for two age groups. Looking at a third group, e.g. at 'below 30', suffers of a quite limited sample size
+
+
+# Data preparation
+
+```{r set file paths}
+define_dataPaths()
+```
+
+```{r read data}
+#| warning: false
+
+tse <- readAndPrepare_mainTaxonomicData(path_groupInfoRdata               = path_groupInfoRdata,
+                                        path_participantRdata             = path_participantRdata,
+                                        path_samplesIDxlsx                = path_samplesIDxlsx,
+                                        path_dietInfoCsv                  = path_dietInfoCsv,
+                                        path_nutrientInfoCsv              = path_nutrientInfoCsv,
+                                        path_bloodMetabolomeXlsx          = path_bloodMetabolomeXlsx,
+                                        path_stoolMetabolomeXlsx          = path_stoolMetabolomeXlsx,
+                                        path_T4questXlsx                  = path_T4questXlsx,
+                                        path_stoolInfoXlsx                = path_stoolInfoXlsx,
+                                        path_bodyMeasuresXlsx             = path_bodyMeasuresXlsx,
+                                        path_absTaxonomyData              = path_absTaxonomyData,
+                                        path_relTaxonomyData              = path_relTaxonomyData,
+                                        path_sampleLookupXlsx             = path_sampleLookupXlsx,
+                                        path_krautLookupXlsx              = path_krautLookupXlsx,
+                                        path_bloodMarkerBostonRdata       = path_bloodMarkerBostonRdata,
+                                        path_bloodMarkerZentrallaborRdata = path_bloodMarkerZentrallaborRdata,
+                                        path_bloodMarkerBostonXlsx        = path_bloodMarkerBostonXlsx,
+                                        path_bloodMarkerZentrallaborXlsx  = path_bloodMarkerZentrallaborXlsx,
+                                        aggregation_level                 = "species",
+                                        exclude_sickParticipants          = "taxonomy paper")
+
+dat <- tse %>% 
+  colData() %>% 
+  as.data.frame()
+```
+
+```{r compute experiment variables}
+# remove follow-up measurements
+dat_model <- dat %>% 
+  filter(intervention != "FollowUp") %>% 
+  mutate(timepoint    = droplevels(timepoint),
+         period       = droplevels(period),
+         intervention = droplevels(intervention))
+
+# construct the intervention variable and the carry-over variable
+dat_model <- dat_model %>% 
+  mutate(intervention = case_when(treatment == "Baseline" ~ "Baseline",
+                                  TRUE                    ~ intervention),
+         carry_over   = case_when(timepoint %in% c("T1", "T2") ~ "not possible (T1, T2)",
+                                  group == "Fresh first"       ~ "from fresh intervention",
+                                  group == "Pasteurized first" ~ "from pasteurized intervention"),
+         carry_over   = factor(carry_over, levels = c("not possible (T1, T2)", "from fresh intervention", "from pasteurized intervention")),
+         phase        = case_when(timepoint %in% c("T3","T4") ~ "phase 2",
+                                  TRUE                        ~ "phase 1"),
+         phase        = factor(phase))
+
+# categorize the age and bmi variables for testing category-specific intervention effects
+dat_model <- dat_model %>% 
+  mutate(age_centered50 = age - 50,
+         bmi_centered25 = bmi_t0 - 25,
+         age_cat = case_when(age < 50 ~ paste0(min(age), "-49"),
+                             TRUE     ~ paste0("50-", max(age))),
+         age_cat = factor(age_cat),
+         bmi_cat = case_when(bmi_t0 < 25 ~ paste0("[", floor(min(bmi_t0)), ", 25)"),
+                             TRUE        ~ paste0("[25, ", ceiling(max(bmi_t0)), "]")),
+         bmi_cat = factor(bmi_cat))
+```
+
+```{r lookup vectors}
+SCFA_markers         <- c("Acetic acid (Stool)"          = "stool_aceticAcid",
+                          "Propionic acid (Stool)"       = "stool_propionicAcid",
+                          "Butyric acid (Stool)"         = "stool_butyricAcid",
+                          "Valeric acid (Stool)"         = "stool_valericAcid",
+                          "Hexanoic acid (Stool)"        = "stool_hexanoicAcid")
+BCFA_markers         <- c("Iso-butyric acid (Stool)"     = "stool_isobutyricAcid",
+                          "Iso-valeric acid (Stool)"     = "stool_isovalericAcid",
+                          "2-Methylbutyric acid (Stool)" = "stool_methylbutyricAcid2")
+
+col_vector <- c("scfa" = "#3889E5",
+                "bcfa" = "#9769C9")
+```
+
+
+```{r helper functions}
+# descriptive plot
+plot_variable <- function(dat, variable, cut_extremeValues = TRUE) {
+  colnames(dat)[colnames(dat) == variable] <- "y"
+  
+  ylim <- c(min(dat$y, na.rm = TRUE), quantile(dat$y, probs = ifelse(cut_extremeValues, 0.95, 1), na.rm = TRUE))
+  
+  gg_time <- dat %>% 
+    ggplot(aes(x = timepoint, y = y, fill = group)) +
+    geom_boxplot() +
+    facet_wrap(~ group) +
+    ggtitle(paste(variable, "over time"), subtitle = ifelse(cut_extremeValues, "upper 5% of observations cut off", "")) +
+    ylab(variable) + ylim(ylim) +
+    theme(legend.position = "none",
+          axis.title.x    = element_blank())
+  
+  gg_t1vst3 <- dat %>% 
+    filter(timepoint %in% c("T1", "T3")) %>% 
+    ggplot(aes(x = timepoint, y = y)) +
+    geom_boxplot(fill = "gray95") +
+    ggtitle("T1 vs. T3", subtitle = " ") +
+    ylim(ylim) +
+    theme(axis.title.y = element_blank(),
+          axis.text.y  = element_blank())
+  
+  gg_time + gg_t1vst3 + patchwork::plot_layout(widths = c(.8, .2))
+}
+
+# estimate a regression model with mgcv
+estimate_model <- function(dat, y, family = gaussian(), transformation = identity, interaction_string = "", estimation_method = "REML") {
+  
+  dat[[y]] <- dat[[y]] %>% transformation()
+  
+  covar_string <- paste0("~ intervention +",
+                         ifelse(interaction_string == "", "", paste(interaction_string, "+")),
+                         "phase + gender + age_centered50 + bmi_centered25 + s(participant_id, bs = 're')")
+  
+  paste(y, covar_string) %>% formula() %>% 
+    gam(method = estimation_method, data = dat, family = family)
+}
+
+
+# create a standard residual plot
+plot_residuals <- function(gam_model, title = "") {
+  
+  plot_dat <- data.frame(predictions = gam_model$fitted.values,
+                         residuals   = gam_model$residuals)
+  
+  ggplot(plot_dat, aes(x = predictions, y = residuals)) +
+    geom_hline(yintercept = 0, col = "firebrick", lty = 2) +
+    geom_point() +
+    ylim(c(-1,1) * max(abs(plot_dat$residuals))) +
+    ggtitle(title)
+}
+```
+
+```{r helper function model comparison}
+# estimate both a normal distribution and a Gamma distribution model and return
+# a list of comparison plots and tables
+compare_models <- function(y) {
+  
+  # also reestimate the interaction models once each with changed reference category,
+  # to eventually easily retrieve the individual intervention effects
+  dat_model_changedRef <- dat_model %>% 
+    mutate(gender  = relevel(gender,  ref = "W"),
+           age_cat = relevel(age_cat, ref = "50-69"),
+           bmi_cat = relevel(bmi_cat, ref = "[25, 31]"))
+  
+  # all returned final models are estimated using REML,
+  # all models used for testing potential interaction effects via likelihood ratio tests are estimated using ML
+  
+  m_gaussian           <- estimate_model(dat_model, y, family = gaussian())
+  m_gaussian_ML        <- estimate_model(dat_model, y, family = gaussian(), estimation_method = "ML")
+  m_gaussian_sexInt    <- estimate_model(dat_model, y, family = gaussian(),                       interaction_string = "intervention:gender")
+  m_gaussian_sexInt_ML <- estimate_model(dat_model, y, family = gaussian(),                       interaction_string = "intervention:gender", estimation_method = "ML")
+  m_gaussian_ageInt    <- estimate_model(dat_model, y, family = gaussian(),                       interaction_string = "intervention:age_cat")
+  m_gaussian_ageInt_ML <- estimate_model(dat_model, y, family = gaussian(),                       interaction_string = "intervention:age_cat", estimation_method = "ML")
+  m_gaussian_bmiInt    <- estimate_model(dat_model, y, family = gaussian(),                       interaction_string = "intervention:bmi_cat")
+  m_gaussian_bmiInt_ML <- estimate_model(dat_model, y, family = gaussian(),                       interaction_string = "intervention:bmi_cat", estimation_method = "ML")
+  m_gaussian_sexInt_changedRef <- estimate_model(dat_model_changedRef, y, family = gaussian(),    interaction_string = "intervention:gender")
+  m_gaussian_ageInt_changedRef <- estimate_model(dat_model_changedRef, y, family = gaussian(),    interaction_string = "intervention:age_cat")
+  m_gaussian_bmiInt_changedRef <- estimate_model(dat_model_changedRef, y, family = gaussian(),    interaction_string = "intervention:bmi_cat")
+  
+  m_gaussianLog           <- estimate_model(dat_model, y, family = gaussian(), transformation = log)
+  m_gaussianLog_ML        <- estimate_model(dat_model, y, family = gaussian(), transformation = log, estimation_method = "ML")
+  m_gaussianLog_sexInt    <- estimate_model(dat_model, y, family = gaussian(), transformation = log, interaction_string = "intervention:gender")
+  m_gaussianLog_sexInt_ML <- estimate_model(dat_model, y, family = gaussian(), transformation = log, interaction_string = "intervention:gender", estimation_method = "ML")
+  m_gaussianLog_ageInt    <- estimate_model(dat_model, y, family = gaussian(), transformation = log, interaction_string = "intervention:age_cat")
+  m_gaussianLog_ageInt_ML <- estimate_model(dat_model, y, family = gaussian(), transformation = log, interaction_string = "intervention:age_cat", estimation_method = "ML")
+  m_gaussianLog_bmiInt    <- estimate_model(dat_model, y, family = gaussian(), transformation = log, interaction_string = "intervention:bmi_cat")
+  m_gaussianLog_bmiInt_ML <- estimate_model(dat_model, y, family = gaussian(), transformation = log, interaction_string = "intervention:bmi_cat", estimation_method = "ML")
+  m_gaussianLog_sexInt_changedRef <- estimate_model(dat_model_changedRef, y, family = gaussian(), transformation = log, interaction_string = "intervention:gender")
+  m_gaussianLog_ageInt_changedRef <- estimate_model(dat_model_changedRef, y, family = gaussian(), transformation = log, interaction_string = "intervention:age_cat")
+  m_gaussianLog_bmiInt_changedRef <- estimate_model(dat_model_changedRef, y, family = gaussian(), transformation = log, interaction_string = "intervention:bmi_cat")
+
+  m_gamma              <- estimate_model(dat_model, y, family = Gamma(link = "log"))
+  m_gamma_ML           <- estimate_model(dat_model, y, family = Gamma(link = "log"), estimation_method = "ML")
+  m_gamma_sexInt       <- estimate_model(dat_model, y, family = Gamma(link = "log"),              interaction_string = "intervention:gender")
+  m_gamma_sexInt_ML    <- estimate_model(dat_model, y, family = Gamma(link = "log"),              interaction_string = "intervention:gender", estimation_method = "ML")
+  m_gamma_ageInt       <- estimate_model(dat_model, y, family = Gamma(link = "log"),              interaction_string = "intervention:age_cat")
+  m_gamma_ageInt_ML    <- estimate_model(dat_model, y, family = Gamma(link = "log"),              interaction_string = "intervention:age_cat", estimation_method = "ML")
+  m_gamma_bmiInt       <- estimate_model(dat_model, y, family = Gamma(link = "log"),              interaction_string = "intervention:bmi_cat")
+  m_gamma_bmiInt_ML    <- estimate_model(dat_model, y, family = Gamma(link = "log"),              interaction_string = "intervention:bmi_cat", estimation_method = "ML")
+  m_gamma_sexInt_changedRef <- estimate_model(dat_model_changedRef, y, family = Gamma(link = "log"), interaction_string = "intervention:gender")
+  m_gamma_ageInt_changedRef <- estimate_model(dat_model_changedRef, y, family = Gamma(link = "log"), interaction_string = "intervention:age_cat")
+  m_gamma_bmiInt_changedRef <- estimate_model(dat_model_changedRef, y, family = Gamma(link = "log"), interaction_string = "intervention:bmi_cat")
+  
+  # 1) table of explained deviances and tests against the base model
+  p_gs_sexInt    <- anova.gam(m_gaussian_ML,    m_gaussian_sexInt_ML,    test = "Chisq")$`Pr(>Chi)`[2] %>% round(4)
+  p_gs_ageInt    <- anova.gam(m_gaussian_ML,    m_gaussian_ageInt_ML,    test = "Chisq")$`Pr(>Chi)`[2] %>% round(4)
+  p_gs_bmiInt    <- anova.gam(m_gaussian_ML,    m_gaussian_bmiInt_ML,    test = "Chisq")$`Pr(>Chi)`[2] %>% round(4)
+  p_gsLog_sexInt <- anova.gam(m_gaussianLog_ML, m_gaussianLog_sexInt_ML, test = "Chisq")$`Pr(>Chi)`[2] %>% round(4)
+  p_gsLog_ageInt <- anova.gam(m_gaussianLog_ML, m_gaussianLog_ageInt_ML, test = "Chisq")$`Pr(>Chi)`[2] %>% round(4)
+  p_gsLog_bmiInt <- anova.gam(m_gaussianLog_ML, m_gaussianLog_bmiInt_ML, test = "Chisq")$`Pr(>Chi)`[2] %>% round(4)
+  p_gm_sexInt    <- anova.gam(m_gamma_ML,       m_gamma_sexInt_ML,       test = "Chisq")$`Pr(>Chi)`[2] %>% round(4)
+  p_gm_ageInt    <- anova.gam(m_gamma_ML,       m_gamma_ageInt_ML,       test = "Chisq")$`Pr(>Chi)`[2] %>% round(4)
+  p_gm_bmiInt    <- anova.gam(m_gamma_ML,       m_gamma_bmiInt_ML,       test = "Chisq")$`Pr(>Chi)`[2] %>% round(4)
+  
+  # in case the simpler model has lower (= better) deviance, no p-values is calculated by 'anova.gam'
+  p_gs_sexInt    <- ifelse(is.na(p_gs_sexInt),    0.9999, p_gs_sexInt)
+  p_gs_ageInt    <- ifelse(is.na(p_gs_ageInt),    0.9999, p_gs_ageInt)
+  p_gs_bmiInt    <- ifelse(is.na(p_gs_bmiInt),    0.9999, p_gs_bmiInt)
+  p_gsLog_sexInt <- ifelse(is.na(p_gsLog_sexInt), 0.9999, p_gsLog_sexInt)
+  p_gsLog_ageInt <- ifelse(is.na(p_gsLog_ageInt), 0.9999, p_gsLog_ageInt)
+  p_gsLog_bmiInt <- ifelse(is.na(p_gsLog_bmiInt), 0.9999, p_gsLog_bmiInt)
+  p_gm_sexInt    <- ifelse(is.na(p_gm_sexInt),    0.9999, p_gm_sexInt)
+  p_gm_ageInt    <- ifelse(is.na(p_gm_ageInt),    0.9999, p_gm_ageInt)
+  p_gm_bmiInt    <- ifelse(is.na(p_gm_bmiInt),    0.9999, p_gm_bmiInt)
+  
+  tab_dev <- data.frame("Model"             = c("Raw intervention effect", "Intervention effect by gender", "Intervention effect by age group", "Intervention effect by BMI group"),
+                        "Gaussian"          = c(paste0(round(100 * summary(m_gaussian_ML)$dev.expl,           1), "%"),
+                                                paste0(round(100 * summary(m_gaussian_sexInt_ML)$dev.expl,    1), "% (p = ", p_gs_sexInt, ")"),
+                                                paste0(round(100 * summary(m_gaussian_ageInt_ML)$dev.expl,    1), "% (p = ", p_gs_ageInt, ")"),
+                                                paste0(round(100 * summary(m_gaussian_bmiInt_ML)$dev.expl,    1), "% (p = ", p_gs_bmiInt, ")")),
+                        "Gaussian_logTrafo" = c(paste0(round(100 * summary(m_gaussianLog_ML)$dev.expl,        1), "%"),
+                                                paste0(round(100 * summary(m_gaussianLog_sexInt_ML)$dev.expl, 1), "% (p = ", p_gsLog_sexInt, ")"),
+                                                paste0(round(100 * summary(m_gaussianLog_ageInt_ML)$dev.expl, 1), "% (p = ", p_gsLog_ageInt, ")"),
+                                                paste0(round(100 * summary(m_gaussianLog_bmiInt_ML)$dev.expl, 1), "% (p = ", p_gsLog_bmiInt, ")")),
+                        "Gamma"             = c(paste0(round(100 * summary(m_gamma_ML)$dev.expl,              1), "%"),
+                                                paste0(round(100 * summary(m_gamma_sexInt_ML)$dev.expl,       1), "% (p = ", p_gm_sexInt, ")"),
+                                                paste0(round(100 * summary(m_gamma_ageInt_ML)$dev.expl,       1), "% (p = ", p_gm_ageInt, ")"),
+                                                paste0(round(100 * summary(m_gamma_bmiInt_ML)$dev.expl,       1), "% (p = ", p_gm_bmiInt, ")")))
+  colnames(tab_dev)[2:4] <- c("Gaussian", "Gaussian (log trafo)", "Gamma")
+  
+  # 2) table of intervention effects (to judge the potential interactions)
+  est_gs <- summary(m_gaussian)$p.table[,"Estimate"]
+  est_gm <- summary(m_gamma)$p.table[,"Estimate"]
+  tab_est_noInt <- data.frame("Model"    = "Raw intervention effect",
+                              "Effect"   = c("Fresh vs. baseline", "Pasteurized vs. baseline"),
+                              "Gaussian" = est_gs[c("interventionFresh", "interventionPasteurized")] %>% unname() %>% round(1),
+                              "Gamma"    = est_gm[c("interventionFresh", "interventionPasteurized")] %>% unname() %>% round(3))
+
+  est_gsA <- summary(m_gaussian_ageInt)$p.table[,"Estimate"]
+  est_gmA <- summary(m_gamma_ageInt)$p.table[,"Estimate"]
+  tab_est_ageInt <- data.frame("Model"    = "Intervention effect by age group",
+                               "Effect"   = paste(rep(c("Fresh vs. baseline", "Pasteurized vs. baseline"), each  = 2),
+                                                  rep(c("- age 21-49", "- age 50-69"),                     times = 2)),
+                               "Gaussian" = c(est_gsA[["interventionFresh"]],
+                                              est_gsA[["interventionFresh"]] + est_gsA[["interventionFresh:age_cat50-69"]] - est_gsA[["interventionBaseline:age_cat50-69"]],
+                                              est_gsA[["interventionPasteurized"]],
+                                              est_gsA[["interventionPasteurized"]] + est_gsA[["interventionPasteurized:age_cat50-69"]] - est_gsA[["interventionBaseline:age_cat50-69"]]),
+                               "Gamma"    = c(est_gmA[["interventionFresh"]],
+                                              est_gmA[["interventionFresh"]] + est_gmA[["interventionFresh:age_cat50-69"]] - est_gmA[["interventionBaseline:age_cat50-69"]],
+                                              est_gmA[["interventionPasteurized"]],
+                                              est_gmA[["interventionPasteurized"]] + est_gmA[["interventionPasteurized:age_cat50-69"]] - est_gmA[["interventionBaseline:age_cat50-69"]]))
+
+  est_gsB <- summary(m_gaussian_bmiInt)$p.table[,"Estimate"]
+  est_gmB <- summary(m_gamma_bmiInt)$p.table[,"Estimate"]
+  tab_est_bmiInt <- data.frame("Model" = "Intervention effect by BMI group",
+                               "Effect"   = paste(rep(c("Fresh vs. baseline", "Pasteurized vs. baseline"), each  = 2),
+                                                  rep(c("- BMI [18, 25)", "- BMI [25, 31]",                times = 2))),
+                               "Gaussian" = c(est_gsB[["interventionFresh"]],
+                                              est_gsB[["interventionFresh"]] + est_gsB[["interventionFresh:bmi_cat[25, 31]"]] - est_gsB[["interventionBaseline:bmi_cat[25, 31]"]],
+                                              est_gsB[["interventionPasteurized"]],
+                                              est_gsB[["interventionPasteurized"]] + est_gsB[["interventionPasteurized:bmi_cat[25, 31]"]] - est_gsB[["interventionBaseline:bmi_cat[25, 31]"]]),
+                               "Gamma"    = c(est_gmB[["interventionFresh"]],
+                                              est_gmB[["interventionFresh"]] + est_gmB[["interventionFresh:bmi_cat[25, 31]"]] - est_gmB[["interventionBaseline:bmi_cat[25, 31]"]],
+                                              est_gmB[["interventionPasteurized"]],
+                                              est_gmB[["interventionPasteurized"]] + est_gmB[["interventionPasteurized:bmi_cat[25, 31]"]] - est_gmB[["interventionBaseline:bmi_cat[25, 31]"]]))
+
+  tab_effects <- tab_est_noInt %>% dplyr::bind_rows(tab_est_ageInt) %>% dplyr::bind_rows(tab_est_bmiInt) %>%
+    mutate(Gaussian = round(Gaussian, 2),
+           Gamma    = round(Gamma, 3))
+  
+  # 3) residual plots
+  gg_residuals <- plot_residuals(m_gaussian, "Gaussian\nwithout interaction") +
+    plot_residuals(m_gaussianLog, "Gaussian with log trafo\nwithout interaction") +
+    plot_residuals(m_gamma, "Gamma\nwithout interaction") +
+    patchwork::plot_layout(nrow = 1)
+  
+  # 4) QQ plots
+  qq_gaussian    <- m_gaussian %>% mgcViz::getViz() %>% mgcViz::qq.gamViz() +
+    ggtitle("Gaussian") + theme_minimal() + theme(plot.title = element_text(hjust = 0.5))
+  qq_gaussianLog <- m_gaussianLog %>% mgcViz::getViz() %>% mgcViz::qq.gamViz() +
+    ggtitle("Gaussian (log trafo)") + theme_minimal() + theme(plot.title = element_text(hjust = 0.5))
+  qq_gamma       <- m_gamma    %>% mgcViz::getViz() %>% mgcViz::qq.gamViz() +
+    ggtitle("Gamma") + theme_minimal() + theme(plot.title = element_text(hjust = 0.5))
+  
+  
+  list("model_gaussian"           = m_gaussian,
+       "model_gaussian_sexInt"    = m_gaussian_sexInt,
+       "model_gaussian_ageInt"    = m_gaussian_ageInt,
+       "model_gaussian_bmiInt"    = m_gaussian_bmiInt,
+       "model_gaussian_sexInt_changedRef" = m_gaussian_sexInt_changedRef,
+       "model_gaussian_ageInt_changedRef" = m_gaussian_ageInt_changedRef,
+       "model_gaussian_bmiInt_changedRef" = m_gaussian_bmiInt_changedRef,
+       "model_gaussianLog"        = m_gaussianLog,
+       "model_gaussianLog_sexInt" = m_gaussianLog_sexInt,
+       "model_gaussianLog_ageInt" = m_gaussianLog_ageInt,
+       "model_gaussianLog_bmiInt" = m_gaussianLog_bmiInt,
+       "model_gaussianLog_sexInt_changedRef" = m_gaussianLog_sexInt_changedRef,
+       "model_gaussianLog_ageInt_changedRef" = m_gaussianLog_ageInt_changedRef,
+       "model_gaussianLog_bmiInt_changedRef" = m_gaussianLog_bmiInt_changedRef,
+       "model_gamma"              = m_gamma,
+       "model_gamma_sexInt"       = m_gamma_sexInt,
+       "model_gamma_ageInt"       = m_gamma_ageInt,
+       "model_gamma_bmiInt"       = m_gamma_bmiInt,
+       "model_gamma_sexInt_changedRef" = m_gamma_sexInt_changedRef,
+       "model_gamma_ageInt_changedRef" = m_gamma_ageInt_changedRef,
+       "model_gamma_bmiInt_changedRef" = m_gamma_bmiInt_changedRef,
+       "tab_explainedDeviances"   = tab_dev,
+       "tab_effects"              = tab_effects,
+       "gg_residuals"             = gg_residuals,
+       "qq_gaussian"              = qq_gaussian,
+       "qq_gaussianLog"           = qq_gaussianLog,
+       "qq_gamma"                 = qq_gamma) %>% 
+    return()
+}
+```
+
+
+# SCRF - 2-Methylbutyric acid
+
+## Description
+
+```{r}
+#| fig.width: 8
+#| fig.height: 5
+#| warning: false
+
+plot_variable(dat, "stool_methylbutyricAcid", cut_extremeValues = FALSE)
+```
+
+## Model comparison
+
+Share of deviance explained (including p-values for testing the respective interaction model against the model without interaction):
+
+```{r}
+#| fig.width: 8
+#| fig.height: 4
+
+outputList_methylbutyric_acid2 <- compare_models("stool_methylbutyricAcid")
+
+outputList_methylbutyric_acid2$tab_explainedDeviances %>% kable() %>% kable_styling()
+# outputList_methylbutyric_acid2$tab_effects %>% kable() %>% kable_styling() %>%
+#   group_rows("Intervention by age", 3, 6) %>% group_rows("Intervention by BMI", 7, 10)
+outputList_methylbutyric_acid2$gg_residuals
+mgcViz::gridPrint(outputList_methylbutyric_acid2$qq_gaussian, outputList_methylbutyric_acid2$qq_gaussianLog, outputList_methylbutyric_acid2$qq_gamma, nrow = 1)
+```
+
+## Final model (log Gaussian)
+
+##### Estimated effects
+
+```{r}
+#| fig.width: 8
+#| fig.height: 4
+
+m_methylbutyric_acid2        <- outputList_methylbutyric_acid2$model_gaussianLog
+
+APCtools:::extract_summary_linearEffects(m_methylbutyric_acid2) %>% 
+  mutate(coef_exp = exp(coef),
+         se_exp   = exp(se),
+         CI_lower_exp = exp(CI_lower),
+         CI_upper_exp = exp(CI_upper),
+         pvalue       = case_when(param == "(Intercept)" ~ "-",
+                                  TRUE                   ~ pvalue %>% round(4) %>% as.character()),
+         across(!contains("param") & !contains("pvalue"), function(x) { round(x, 3) })) %>% 
+  select(!contains("pvalue"), pvalue) %>% 
+  kable() %>% 
+  kable_styling()
+APCtools::plot_linearEffects(m_methylbutyric_acid2)
+
+# save the interaction models for later use for visualization
+m_methylbutyric_acid2_sexInt            <- outputList_methylbutyric_acid2$model_gaussianLog_sexInt
+m_methylbutyric_acid2_sexInt_changedRef <- outputList_methylbutyric_acid2$model_gaussianLog_sexInt_changedRef
+m_methylbutyric_acid2_ageInt            <- outputList_methylbutyric_acid2$model_gaussianLog_ageInt
+m_methylbutyric_acid2_ageInt_changedRef <- outputList_methylbutyric_acid2$model_gaussianLog_ageInt_changedRef
+m_methylbutyric_acid2_bmiInt            <- outputList_methylbutyric_acid2$model_gaussianLog_bmiInt
+m_methylbutyric_acid2_bmiInt_changedRef <- outputList_methylbutyric_acid2$model_gaussianLog_bmiInt_changedRef
+```
+
+
+# SCRF - Acetic acid
+
+## Sensitivity analysis results
+
+All below results were estimated on the observed data, without specific outlier
+exclusion / handling.
+To check the influence of outliers on the results, the below models were re-estimated
+on the dataset in which outliers (= points above the threshold 'mean + 3*sd') were
+trimmed to the treshold 'mean + 3*sd'.
+These sensitivity results are not comprised in this document.
+The results based on the trimmed data were not substantially different from the original results.
+
+```{r}
+# # trim outliers to mean + 3*sd
+# upper_threshold <- median(dat$stool_aceticAcid) + 3*sd(dat$stool_aceticAcid)
+# 
+# dat <- dat %>% 
+#   mutate(stool_aceticAcid_trimmed = case_when(stool_aceticAcid < upper_threshold ~ stool_aceticAcid,
+#                                               TRUE                               ~ upper_threshold))
+# dat_model <- dat_model %>% 
+#   mutate(stool_aceticAcid_trimmed = case_when(stool_aceticAcid < upper_threshold ~ stool_aceticAcid,
+#                                               TRUE                               ~ upper_threshold))
+```
+
+
+## Description
+
+```{r}
+#| fig.width: 8
+#| fig.height: 5
+#| warning: false
+
+plot_variable(dat, "stool_aceticAcid", cut_extremeValues = FALSE)
+```
+
+## Model comparison
+
+Share of deviance explained (including p-values for testing the respective interaction model against the model without interaction):
+
+```{r}
+#| fig.width: 8
+#| fig.height: 4
+
+outputList_acetic_acid <- compare_models("stool_aceticAcid")
+
+outputList_acetic_acid$tab_explainedDeviances %>% kable() %>% kable_styling()
+# outputList_acetic_acid$tab_effects %>% kable() %>% kable_styling() %>%
+#   group_rows("Intervention by age", 3, 6) %>% group_rows("Intervention by BMI", 7, 10)
+outputList_acetic_acid$gg_residuals
+mgcViz::gridPrint(outputList_acetic_acid$qq_gaussian, outputList_acetic_acid$qq_gaussianLog, outputList_acetic_acid$qq_gamma, nrow = 1)
+```
+
+## Final model (Gamma)
+
+##### Estimated effects
+
+```{r}
+#| fig.width: 8
+#| fig.height: 4
+
+m_acetic_acid        <- outputList_acetic_acid$model_gamma
+
+APCtools:::extract_summary_linearEffects(m_acetic_acid) %>% 
+  mutate(coef_exp = exp(coef),
+         se_exp   = exp(se),
+         CI_lower_exp = exp(CI_lower),
+         CI_upper_exp = exp(CI_upper),
+         pvalue       = case_when(param == "(Intercept)" ~ "-",
+                                  TRUE                   ~ pvalue %>% round(4) %>% as.character()),
+         across(!contains("param") & !contains("pvalue"), function(x) { round(x, 3) })) %>% 
+  select(!contains("pvalue"), pvalue) %>% 
+  kable() %>% 
+  kable_styling()
+APCtools::plot_linearEffects(m_acetic_acid)
+
+# save the interaction models for later use for visualization
+m_acetic_acid_sexInt            <- outputList_acetic_acid$model_gamma_sexInt
+m_acetic_acid_sexInt_changedRef <- outputList_acetic_acid$model_gamma_sexInt_changedRef
+m_acetic_acid_ageInt            <- outputList_acetic_acid$model_gamma_ageInt
+m_acetic_acid_ageInt_changedRef <- outputList_acetic_acid$model_gamma_ageInt_changedRef
+m_acetic_acid_bmiInt            <- outputList_acetic_acid$model_gamma_bmiInt
+m_acetic_acid_bmiInt_changedRef <- outputList_acetic_acid$model_gamma_bmiInt_changedRef
+```
+
+
+# SCRF - Butyric acid
+
+## Sensitivity analysis results
+
+All below results were estimated on the observed data, without specific outlier
+exclusion / handling.
+To check the influence of outliers on the results, the below models were re-estimated
+on the dataset in which outliers (= points above the threshold 'mean + 3*sd') were
+trimmed to the treshold 'mean + 3*sd'.
+These sensitivity results are not comprised in this document.
+The results based on the trimmed data were not substantially different from the original results.
+
+```{r}
+# # trim outliers to mean + 3*sd
+# upper_threshold <- median(dat$stool_butyricAcid) + 3*sd(dat$stool_butyricAcid)
+# 
+# dat <- dat %>%
+#   mutate(stool_butyricAcid_trimmed = case_when(stool_butyricAcid < upper_threshold ~ stool_butyricAcid,
+#                                                TRUE                               ~ upper_threshold))
+# dat_model <- dat_model %>%
+#   mutate(stool_butyricAcid_trimmed = case_when(stool_butyricAcid < upper_threshold ~ stool_butyricAcid,
+#                                                TRUE                               ~ upper_threshold))
+```
+
+
+## Description
+
+```{r}
+#| fig.width: 8
+#| fig.height: 5
+#| warning: false
+
+plot_variable(dat, "stool_butyricAcid", cut_extremeValues = FALSE)
+```
+
+## Model comparison
+
+Share of deviance explained (including p-values for testing the respective interaction model against the model without interaction):
+
+```{r}
+#| fig.width: 8
+#| fig.height: 4
+
+outputList_butyric_acid <- compare_models("stool_butyricAcid")
+
+outputList_butyric_acid$tab_explainedDeviances %>% kable() %>% kable_styling()
+# outputList_butyric_acid$tab_effects %>% kable() %>% kable_styling() %>%
+#   group_rows("Intervention by age", 3, 6) %>% group_rows("Intervention by BMI", 7, 10)
+outputList_butyric_acid$gg_residuals
+mgcViz::gridPrint(outputList_butyric_acid$qq_gaussian, outputList_butyric_acid$qq_gaussianLog, outputList_butyric_acid$qq_gamma, nrow = 1)
+```
+
+## Final model (Gamma)
+
+##### Estimated effects
+
+```{r}
+#| fig.width: 8
+#| fig.height: 4
+
+m_butyric_acid        <- outputList_butyric_acid$model_gamma
+
+APCtools:::extract_summary_linearEffects(m_butyric_acid) %>% 
+  mutate(coef_exp = exp(coef),
+         se_exp   = exp(se),
+         CI_lower_exp = exp(CI_lower),
+         CI_upper_exp = exp(CI_upper),
+         pvalue       = case_when(param == "(Intercept)" ~ "-",
+                                  TRUE                   ~ pvalue %>% round(4) %>% as.character()),
+         across(!contains("param") & !contains("pvalue"), function(x) { round(x, 3) })) %>% 
+  select(!contains("pvalue"), pvalue) %>% 
+  kable() %>% 
+  kable_styling()
+APCtools::plot_linearEffects(m_butyric_acid)
+
+# save the interaction models for later use for visualization
+m_butyric_acid_sexInt            <- outputList_butyric_acid$model_gamma_sexInt
+m_butyric_acid_sexInt_changedRef <- outputList_butyric_acid$model_gamma_sexInt_changedRef
+m_butyric_acid_ageInt            <- outputList_butyric_acid$model_gamma_ageInt
+m_butyric_acid_ageInt_changedRef <- outputList_butyric_acid$model_gamma_ageInt_changedRef
+m_butyric_acid_bmiInt            <- outputList_butyric_acid$model_gamma_bmiInt
+m_butyric_acid_bmiInt_changedRef <- outputList_butyric_acid$model_gamma_bmiInt_changedRef
+```
+
+
+# SCRF - Hexanoic acid
+
+## Sensitivity analysis results
+
+All below results were estimated on the observed data, without specific outlier
+exclusion / handling.
+To check the influence of outliers on the results, the below models were re-estimated
+on the dataset in which outliers (= points above the threshold 'mean + 3*sd') were
+trimmed to the treshold 'mean + 3*sd'.
+These sensitivity results are not comprised in this document.
+The results based on the trimmed data were not substantially different from the original results.
+
+```{r}
+# # trim outliers to mean + 3*sd
+# upper_threshold <- median(dat$stool_hexanoicAcid) + 3*sd(dat$stool_hexanoicAcid)
+# 
+# dat <- dat %>%
+#   mutate(stool_hexanoicAcid_trimmed = case_when(stool_hexanoicAcid < upper_threshold ~ stool_hexanoicAcid,
+#                                                 TRUE                               ~ upper_threshold))
+# dat_model <- dat_model %>%
+#   mutate(stool_hexanoicAcid_trimmed = case_when(stool_hexanoicAcid < upper_threshold ~ stool_hexanoicAcid,
+#                                                 TRUE                               ~ upper_threshold))
+```
+
+
+## Description
+
+```{r}
+#| fig.width: 8
+#| fig.height: 5
+#| warning: false
+
+plot_variable(dat, "stool_hexanoicAcid", cut_extremeValues = FALSE)
+```
+
+## Model comparison
+
+Share of deviance explained (including p-values for testing the respective interaction model against the model without interaction):
+
+```{r}
+#| fig.width: 8
+#| fig.height: 4
+
+outputList_hexanoic_acid <- compare_models("stool_hexanoicAcid")
+
+outputList_hexanoic_acid$tab_explainedDeviances %>% kable() %>% kable_styling()
+# outputList_hexanoic_acid$tab_effects %>% kable() %>% kable_styling() %>%
+#   group_rows("Intervention by age", 3, 6) %>% group_rows("Intervention by BMI", 7, 10)
+outputList_hexanoic_acid$gg_residuals
+mgcViz::gridPrint(outputList_hexanoic_acid$qq_gaussian, outputList_hexanoic_acid$qq_gaussianLog, outputList_hexanoic_acid$qq_gamma, nrow = 1)
+```
+
+## Final model (Gaussian)
+
+##### Estimated effects
+
+```{r}
+#| fig.width: 8
+#| fig.height: 4
+
+m_hexanoic_acid        <- outputList_hexanoic_acid$model_gaussian
+
+APCtools:::extract_summary_linearEffects(m_hexanoic_acid) %>% 
+  mutate(pvalue       = case_when(param == "(Intercept)" ~ "-",
+                                  TRUE                   ~ pvalue %>% round(4) %>% as.character()),
+         across(!contains("param") & !contains("pvalue"), function(x) { round(x, 3) })) %>% 
+  select(!contains("pvalue"), pvalue) %>% 
+  kable() %>% 
+  kable_styling()
+APCtools::plot_linearEffects(m_hexanoic_acid)
+
+# save the interaction models for later use for visualization
+m_hexanoic_acid_sexInt            <- outputList_hexanoic_acid$model_gaussian_sexInt
+m_hexanoic_acid_sexInt_changedRef <- outputList_hexanoic_acid$model_gaussian_sexInt_changedRef
+m_hexanoic_acid_ageInt            <- outputList_hexanoic_acid$model_gaussian_ageInt
+m_hexanoic_acid_ageInt_changedRef <- outputList_hexanoic_acid$model_gaussian_ageInt_changedRef
+m_hexanoic_acid_bmiInt            <- outputList_hexanoic_acid$model_gaussian_bmiInt
+m_hexanoic_acid_bmiInt_changedRef <- outputList_hexanoic_acid$model_gaussian_bmiInt_changedRef
+```
+
+
+# SCRF - Isobutyric acid
+
+## Description
+
+```{r}
+#| fig.width: 8
+#| fig.height: 5
+#| warning: false
+
+plot_variable(dat, "stool_isobutyricAcid", cut_extremeValues = FALSE)
+```
+
+## Model comparison
+
+Share of deviance explained (including p-values for testing the respective interaction model against the model without interaction):
+
+```{r}
+#| fig.width: 8
+#| fig.height: 4
+
+outputList_isobutyric_acid <- compare_models("stool_isobutyricAcid")
+
+outputList_isobutyric_acid$tab_explainedDeviances %>% kable() %>% kable_styling()
+# outputList_isobutyric_acid$tab_effects %>% kable() %>% kable_styling() %>%
+#   group_rows("Intervention by age", 3, 6) %>% group_rows("Intervention by BMI", 7, 10)
+outputList_isobutyric_acid$gg_residuals
+mgcViz::gridPrint(outputList_isobutyric_acid$qq_gaussian, outputList_isobutyric_acid$qq_gaussianLog, outputList_isobutyric_acid$qq_gamma, nrow = 1)
+```
+
+## Final model (Gamma)
+
+##### Estimated effects
+
+```{r}
+#| fig.width: 8
+#| fig.height: 4
+
+m_isobutyric_acid        <- outputList_isobutyric_acid$model_gamma
+
+APCtools:::extract_summary_linearEffects(m_isobutyric_acid) %>% 
+  mutate(coef_exp = exp(coef),
+         se_exp   = exp(se),
+         CI_lower_exp = exp(CI_lower),
+         CI_upper_exp = exp(CI_upper),
+         pvalue       = case_when(param == "(Intercept)" ~ "-",
+                                  TRUE                   ~ pvalue %>% round(4) %>% as.character()),
+         across(!contains("param") & !contains("pvalue"), function(x) { round(x, 3) })) %>% 
+  select(!contains("pvalue"), pvalue) %>% 
+  kable() %>% 
+  kable_styling()
+APCtools::plot_linearEffects(m_isobutyric_acid)
+
+# save the interaction models for later use for visualization
+m_isobutyric_acid_sexInt            <- outputList_isobutyric_acid$model_gamma_sexInt
+m_isobutyric_acid_sexInt_changedRef <- outputList_isobutyric_acid$model_gamma_sexInt_changedRef
+m_isobutyric_acid_ageInt            <- outputList_isobutyric_acid$model_gamma_ageInt
+m_isobutyric_acid_ageInt_changedRef <- outputList_isobutyric_acid$model_gamma_ageInt_changedRef
+m_isobutyric_acid_bmiInt            <- outputList_isobutyric_acid$model_gamma_bmiInt
+m_isobutyric_acid_bmiInt_changedRef <- outputList_isobutyric_acid$model_gamma_bmiInt_changedRef
+```
+
+
+# SCRF - Isovaleric acid
+
+## Sensitivity analysis results
+
+All below results were estimated on the observed data, without specific outlier
+exclusion / handling.
+To check the influence of outliers on the results, the below models were re-estimated
+on the dataset in which outliers (= points above the threshold 'mean + 3*sd') were
+trimmed to the treshold 'mean + 3*sd'.
+These sensitivity results are not comprised in this document.
+The results based on the trimmed data were not substantially different from the original results.
+
+```{r}
+# # trim outliers to mean + 3*sd
+# upper_threshold <- median(dat$stool_isovalericAcid) + 3*sd(dat$stool_isovalericAcid)
+# 
+# dat <- dat %>%
+#   mutate(stool_isovalericAcid_trimmed = case_when(stool_isovalericAcid < upper_threshold ~ stool_isovalericAcid,
+#                                                   TRUE                               ~ upper_threshold))
+# dat_model <- dat_model %>%
+#   mutate(stool_isovalericAcid_trimmed = case_when(stool_isovalericAcid < upper_threshold ~ stool_isovalericAcid,
+#                                                   TRUE                               ~ upper_threshold))
+```
+
+
+## Description
+
+```{r}
+#| fig.width: 8
+#| fig.height: 5
+#| warning: false
+
+plot_variable(dat, "stool_isovalericAcid", cut_extremeValues = FALSE)
+```
+
+## Model comparison
+
+Share of deviance explained (including p-values for testing the respective interaction model against the model without interaction):
+
+```{r}
+#| fig.width: 8
+#| fig.height: 4
+
+outputList_isovaleric_acid <- compare_models("stool_isovalericAcid")
+
+outputList_isovaleric_acid$tab_explainedDeviances %>% kable() %>% kable_styling()
+# outputList_isovaleric_acid$tab_effects %>% kable() %>% kable_styling() %>%
+#   group_rows("Intervention by age", 3, 6) %>% group_rows("Intervention by BMI", 7, 10)
+outputList_isovaleric_acid$gg_residuals
+mgcViz::gridPrint(outputList_isovaleric_acid$qq_gaussian, outputList_isovaleric_acid$qq_gaussianLog, outputList_isovaleric_acid$qq_gamma, nrow = 1)
+```
+
+## Final model (Gamma)
+
+##### Estimated effects
+
+```{r}
+#| fig.width: 8
+#| fig.height: 4
+
+m_isovaleric_acid        <- outputList_isovaleric_acid$model_gamma
+
+APCtools:::extract_summary_linearEffects(m_isovaleric_acid) %>% 
+  mutate(coef_exp = exp(coef),
+         se_exp   = exp(se),
+         CI_lower_exp = exp(CI_lower),
+         CI_upper_exp = exp(CI_upper),
+         pvalue       = case_when(param == "(Intercept)" ~ "-",
+                                  TRUE                   ~ pvalue %>% round(4) %>% as.character()),
+         across(!contains("param") & !contains("pvalue"), function(x) { round(x, 3) })) %>% 
+  select(!contains("pvalue"), pvalue) %>% 
+  kable() %>% 
+  kable_styling()
+APCtools::plot_linearEffects(m_isovaleric_acid)
+
+# save the interaction models for later use for visualization
+m_isovaleric_acid_sexInt            <- outputList_isovaleric_acid$model_gamma_sexInt
+m_isovaleric_acid_sexInt_changedRef <- outputList_isovaleric_acid$model_gamma_sexInt_changedRef
+m_isovaleric_acid_ageInt            <- outputList_isovaleric_acid$model_gamma_ageInt
+m_isovaleric_acid_ageInt_changedRef <- outputList_isovaleric_acid$model_gamma_ageInt_changedRef
+m_isovaleric_acid_bmiInt            <- outputList_isovaleric_acid$model_gamma_bmiInt
+m_isovaleric_acid_bmiInt_changedRef <- outputList_isovaleric_acid$model_gamma_bmiInt_changedRef
+```
+
+
+# SCRF - Propionic acid
+
+## Sensitivity analysis results
+
+All below results were estimated on the observed data, without specific outlier
+exclusion / handling.
+To check the influence of outliers on the results, the below models were re-estimated
+on the dataset in which outliers (= points above the threshold 'mean + 3*sd') were
+trimmed to the treshold 'mean + 3*sd'.
+These sensitivity results are not comprised in this document.
+The results based on the trimmed data were not substantially different from the original results.
+
+```{r}
+# # trim outliers to mean + 3*sd
+# upper_threshold <- median(dat$stool_propionicAcid) + 3*sd(dat$stool_propionicAcid)
+# 
+# dat <- dat %>%
+#   mutate(stool_propionicAcid_trimmed = case_when(stool_propionicAcid < upper_threshold ~ stool_propionicAcid,
+#                                                  TRUE                               ~ upper_threshold))
+# dat_model <- dat_model %>%
+#   mutate(stool_propionicAcid_trimmed = case_when(stool_propionicAcid < upper_threshold ~ stool_propionicAcid,
+#                                                  TRUE                               ~ upper_threshold))
+```
+
+
+## Description
+
+```{r}
+#| fig.width: 8
+#| fig.height: 5
+#| warning: false
+
+plot_variable(dat, "stool_propionicAcid", cut_extremeValues = FALSE)
+```
+
+## Model comparison
+
+Share of deviance explained (including p-values for testing the respective interaction model against the model without interaction):
+
+```{r}
+#| fig.width: 8
+#| fig.height: 4
+
+outputList_propionic_acid <- compare_models("stool_propionicAcid")
+
+outputList_propionic_acid$tab_explainedDeviances %>% kable() %>% kable_styling()
+# outputList_propionic_acid$tab_effects %>% kable() %>% kable_styling() %>%
+#   group_rows("Intervention by age", 3, 6) %>% group_rows("Intervention by BMI", 7, 10)
+outputList_propionic_acid$gg_residuals
+mgcViz::gridPrint(outputList_propionic_acid$qq_gaussian, outputList_propionic_acid$qq_gaussianLog, outputList_propionic_acid$qq_gamma, nrow = 1)
+```
+
+## Final model (Gamma)
+
+##### Estimated effects
+
+```{r}
+#| fig.width: 8
+#| fig.height: 4
+
+m_propionic_acid        <- outputList_propionic_acid$model_gamma
+
+APCtools:::extract_summary_linearEffects(m_propionic_acid) %>% 
+  mutate(coef_exp = exp(coef),
+         se_exp   = exp(se),
+         CI_lower_exp = exp(CI_lower),
+         CI_upper_exp = exp(CI_upper),
+         pvalue       = case_when(param == "(Intercept)" ~ "-",
+                                  TRUE                   ~ pvalue %>% round(4) %>% as.character()),
+         across(!contains("param") & !contains("pvalue"), function(x) { round(x, 3) })) %>% 
+  select(!contains("pvalue"), pvalue) %>% 
+  kable() %>% 
+  kable_styling()
+APCtools::plot_linearEffects(m_propionic_acid)
+
+# save the interaction models for later use for visualization
+m_propionic_acid_sexInt            <- outputList_propionic_acid$model_gamma_sexInt
+m_propionic_acid_sexInt_changedRef <- outputList_propionic_acid$model_gamma_sexInt_changedRef
+m_propionic_acid_ageInt            <- outputList_propionic_acid$model_gamma_ageInt
+m_propionic_acid_ageInt_changedRef <- outputList_propionic_acid$model_gamma_ageInt_changedRef
+m_propionic_acid_bmiInt            <- outputList_propionic_acid$model_gamma_bmiInt
+m_propionic_acid_bmiInt_changedRef <- outputList_propionic_acid$model_gamma_bmiInt_changedRef
+```
+
+
+# SCRF - Valeric acid
+
+## Sensitivity analysis results
+
+All below results were estimated on the observed data, without specific outlier
+exclusion / handling.
+To check the influence of outliers on the results, the below models were re-estimated
+on the dataset in which outliers (= points above the threshold 'mean + 3*sd') were
+trimmed to the treshold 'mean + 3*sd'.
+These sensitivity results are not comprised in this document.
+The results based on the trimmed data were not substantially different from the original results.
+
+```{r}
+# # trim outliers to mean + 3*sd
+# upper_threshold <- median(dat$stool_valericAcid) + 3*sd(dat$stool_valericAcid)
+# 
+# dat <- dat %>%
+#   mutate(stool_valericAcid_trimmed = case_when(stool_valericAcid < upper_threshold ~ stool_valericAcid,
+#                                                TRUE                                ~ upper_threshold))
+# dat_model <- dat_model %>%
+#   mutate(stool_valericAcid_trimmed = case_when(stool_valericAcid < upper_threshold ~ stool_valericAcid,
+#                                                TRUE                                ~ upper_threshold))
+```
+
+
+## Description
+
+```{r}
+#| fig.width: 8
+#| fig.height: 5
+#| warning: false
+
+plot_variable(dat, "stool_valericAcid", cut_extremeValues = FALSE)
+```
+
+## Model comparison
+
+Share of deviance explained (including p-values for testing the respective interaction model against the model without interaction):
+
+```{r}
+#| fig.width: 8
+#| fig.height: 4
+
+outputList_valeric_acid <- compare_models("stool_valericAcid")
+
+outputList_valeric_acid$tab_explainedDeviances %>% kable() %>% kable_styling()
+# outputList_valeric_acid$tab_effects %>% kable() %>% kable_styling() %>%
+#   group_rows("Intervention by age", 3, 6) %>% group_rows("Intervention by BMI", 7, 10)
+outputList_valeric_acid$gg_residuals
+mgcViz::gridPrint(outputList_valeric_acid$qq_gaussian, outputList_valeric_acid$qq_gaussianLog, outputList_valeric_acid$qq_gamma, nrow = 1)
+```
+
+## Final model (Gaussian)
+
+##### Estimated effects
+
+```{r}
+#| fig.width: 8
+#| fig.height: 4
+
+m_valeric_acid        <- outputList_valeric_acid$model_gaussian
+
+APCtools:::extract_summary_linearEffects(m_valeric_acid) %>% 
+  mutate(pvalue       = case_when(param == "(Intercept)" ~ "-",
+                                  TRUE                   ~ pvalue %>% round(4) %>% as.character()),
+         across(!contains("param") & !contains("pvalue"), function(x) { round(x, 3) })) %>% 
+  select(!contains("pvalue"), pvalue) %>% 
+  kable() %>% 
+  kable_styling()
+APCtools::plot_linearEffects(m_valeric_acid)
+
+# save the interaction models for later use for visualization
+m_valeric_acid_sexInt            <- outputList_valeric_acid$model_gaussian_sexInt
+m_valeric_acid_sexInt_changedRef <- outputList_valeric_acid$model_gaussian_sexInt_changedRef
+m_valeric_acid_ageInt            <- outputList_valeric_acid$model_gaussian_ageInt
+m_valeric_acid_ageInt_changedRef <- outputList_valeric_acid$model_gaussian_ageInt_changedRef
+m_valeric_acid_bmiInt            <- outputList_valeric_acid$model_gaussian_bmiInt
+m_valeric_acid_bmiInt_changedRef <- outputList_valeric_acid$model_gaussian_bmiInt_changedRef
+```
+
+
+# Overview table of all models
+
+```{r}
+# create a joint vector of all variables
+model_names <- c(SCFA_markers, BCFA_markers)
+# create a model list
+model_list <- list("Acetic acid (Stool)"          = m_acetic_acid,
+                   "Propionic acid (Stool)"       = m_propionic_acid,
+                   "Butyric acid (Stool)"         = m_butyric_acid,
+                   "Valeric acid (Stool)"         = m_valeric_acid,
+                   "Hexanoic acid (Stool)"        = m_hexanoic_acid,
+                   "Iso-butyric acid (Stool)"     = m_isobutyric_acid,
+                   "Iso-valeric acid (Stool)"     = m_isovaleric_acid,
+                   "2-Methylbutyric acid (Stool)" = m_methylbutyric_acid2)
+model_sexInt_list <- list("Acetic acid (Stool)"          = list(m_acetic_acid_sexInt, m_acetic_acid_sexInt_changedRef),
+                          "Propionic acid (Stool)"       = list(m_propionic_acid_sexInt, m_propionic_acid_sexInt_changedRef),
+                          "Butyric acid (Stool)"         = list(m_butyric_acid_sexInt, m_butyric_acid_sexInt_changedRef),
+                          "Valeric acid (Stool)"         = list(m_valeric_acid_sexInt, m_valeric_acid_sexInt_changedRef),
+                          "Hexanoic acid (Stool)"        = list(m_hexanoic_acid_sexInt, m_hexanoic_acid_sexInt_changedRef),
+                          "Iso-butyric acid (Stool)"     = list(m_isobutyric_acid_sexInt, m_isobutyric_acid_sexInt_changedRef),
+                          "Iso-valeric acid (Stool)"     = list(m_isovaleric_acid_sexInt, m_isovaleric_acid_sexInt_changedRef),
+                          "2-Methylbutyric acid (Stool)" = list(m_methylbutyric_acid2_sexInt, m_methylbutyric_acid2_sexInt_changedRef))
+model_ageInt_list <- list("Acetic acid (Stool)"          = list(m_acetic_acid_ageInt, m_acetic_acid_ageInt_changedRef),
+                          "Propionic acid (Stool)"       = list(m_propionic_acid_ageInt, m_propionic_acid_ageInt_changedRef),
+                          "Butyric acid (Stool)"         = list(m_butyric_acid_ageInt, m_butyric_acid_ageInt_changedRef),
+                          "Valeric acid (Stool)"         = list(m_valeric_acid_ageInt, m_valeric_acid_ageInt_changedRef),
+                          "Hexanoic acid (Stool)"        = list(m_hexanoic_acid_ageInt, m_hexanoic_acid_ageInt_changedRef),
+                          "Iso-butyric acid (Stool)"     = list(m_isobutyric_acid_ageInt, m_isobutyric_acid_ageInt_changedRef),
+                          "Iso-valeric acid (Stool)"     = list(m_isovaleric_acid_ageInt, m_isovaleric_acid_ageInt_changedRef),
+                          "2-Methylbutyric acid (Stool)" = list(m_methylbutyric_acid2_ageInt, m_methylbutyric_acid2_ageInt_changedRef))
+model_bmiInt_list <- list("Acetic acid (Stool)"          = list(m_acetic_acid_bmiInt, m_acetic_acid_bmiInt_changedRef),
+                          "Propionic acid (Stool)"       = list(m_propionic_acid_bmiInt, m_propionic_acid_bmiInt_changedRef),
+                          "Butyric acid (Stool)"         = list(m_butyric_acid_bmiInt, m_butyric_acid_bmiInt_changedRef),
+                          "Valeric acid (Stool)"         = list(m_valeric_acid_bmiInt, m_valeric_acid_bmiInt_changedRef),
+                          "Hexanoic acid (Stool)"        = list(m_hexanoic_acid_bmiInt, m_hexanoic_acid_bmiInt_changedRef),
+                          "Iso-butyric acid (Stool)"     = list(m_isobutyric_acid_bmiInt, m_isobutyric_acid_bmiInt_changedRef),
+                          "Iso-valeric acid (Stool)"     = list(m_isovaleric_acid_bmiInt, m_isovaleric_acid_bmiInt_changedRef),
+                          "2-Methylbutyric acid (Stool)" = list(m_methylbutyric_acid2_bmiInt, m_methylbutyric_acid2_bmiInt_changedRef))
+# create a lookup list for the final model type
+modelType_list <- list("Acetic acid (Stool)"          = "Gamma",
+                       "Propionic acid (Stool)"       = "Gamma",
+                       "Butyric acid (Stool)"         = "Gamma",
+                       "Valeric acid (Stool)"         = "Gaussian",
+                       "Hexanoic acid (Stool)"        = "Gaussian",
+                       "Iso-butyric acid (Stool)"     = "Gamma",
+                       "Iso-valeric acid (Stool)"     = "Gamma",
+                       "2-Methylbutyric acid (Stool)" = "log Gaussian")
+
+
+# overview table
+data.frame(Model              = names(model_list),
+           Model_type         = unlist(modelType_list, use.names = FALSE),
+           Deviance_explained = sapply(model_list, function(x) { paste0(round(100 * summary(x)$dev.expl, 1), "%") }, USE.NAMES = FALSE) %>% unname()) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+
+# Joint plot of all effects
+
+```{r prepare all model results in one dataset}
+# create a results table with all effects
+modelResults_list <- lapply(names(model_names), function(x) {
+  
+  variable   <- model_names[x] %>% unname()
+  model      <- model_list[[x]]
+  model_type <- modelType_list[[x]]
+  
+  log_wasApplied <- (model_type %in% c("Gamma", "log Gaussian"))
+  
+  results_dat <- summary(model)$p.table %>% 
+    as.data.frame() %>% 
+    mutate(parameter   = row.names(.),
+           param_group = case_when(parameter %in% c("interventionFresh", "interventionPasteurized") ~ "intervention",
+                                   grepl("carry_over", parameter)                                   ~ "carry-over",
+                                   grepl("phase", parameter)                                        ~ "phase",
+                                   grepl("gender", parameter)                                       ~ "gender",
+                                   grepl("bmi", parameter)                                          ~ "BMI",
+                                   grepl("age", parameter)                                          ~ "age",
+                                   TRUE                                                             ~ parameter)) %>% 
+    dplyr::rename(estimate   = "Estimate",
+                  se         = "Std. Error",
+                  pvalue     = "Pr(>|t|)") %>% 
+    mutate(model      = x,
+           model_type = model_type,
+           CI_lower   = estimate - qnorm(0.975) * se,
+           CI_upper   = estimate + qnorm(0.975) * se)
+  
+  if (!log_wasApplied) { # standardize the effects by the standard deviation of the response variable
+    results_dat <- results_dat %>% 
+      mutate(y_sd = sd(dat_model[[variable]], na.rm = TRUE),
+             estimate_standardized = estimate / y_sd,
+             se_standardized       = se / y_sd,
+             CI_lower_standardized = estimate_standardized - qnorm(0.975) * se_standardized,
+             CI_upper_standardized = estimate_standardized + qnorm(0.975) * se_standardized)
+
+  } else { # exponentiate the effects
+    results_dat <- results_dat %>% 
+      mutate(exp_estimate = exp(estimate),
+             exp_CIlower  = exp(CI_lower),
+             exp_CIupper  = exp(CI_upper),
+             y_sd = NA)
+  }
+  
+  results_dat <- results_dat %>% 
+    select(model, model_type, param_group, parameter, y_sd, estimate, CI_lower, CI_upper, pvalue, contains("standardized"), contains("exp"))
+  row.names(results_dat) <- NULL
+  
+  return(results_dat)
+})
+results_dat <- modelResults_list %>% bind_rows() %>% 
+  mutate(model       = factor(model, levels = names(model_names)),
+         model_group = case_when(model %in% names(SCFA_markers) ~ "scfa",
+                                 TRUE                           ~ "bcfa"),
+         model_group = factor(model_group, levels = names(col_vector)))
+```
+
+
+## Intervention effects
+
+```{r}
+#| fig.width: 8
+#| fig.height: 5
+
+# 1) effects of Gaussian models
+ylim_gaussianInt <- c(-.5, .5)
+plot_dat_gaussian <- results_dat %>% 
+  filter(model_type  == "Gaussian",
+         param_group == "intervention") %>% 
+  mutate(parameter = factor(parameter, levels = c("interventionFresh", "interventionPasteurized"),
+                            labels = c("fresh intervention", "pasteurized intervention")),
+         model     = factor(model, levels = levels(model),
+                            labels = levels(model) %>% gsub(pattern = " \\(Stool)", replacement = "")))
+gg_gaussian <- plot_dat_gaussian %>% 
+  ggplot(aes(x = model, y = estimate_standardized, color = model_group)) +
+  geom_hline(yintercept = 0, linetype = 2, col = "gray30") +
+  geom_pointrange(aes(ymin = CI_lower_standardized, ymax = CI_upper_standardized)) +
+  geom_point() +
+  scale_y_continuous("standardized estimate", limits = ylim_gaussianInt,
+                     breaks = c(-.4,-.2,0,.2,.4),
+                     labels = c("-0.4", "-0.2", "0", "+0.2", "+0.4")) +
+  scale_color_manual(values = col_vector) +
+  facet_wrap(~ parameter) +
+  ggtitle("Intervention effects in Gaussian models", "with uncorrected 95% confidence intervals") +
+  theme(axis.text.x        = element_text(hjust = 1, angle = 45),
+        axis.title.x       = element_blank(),
+        panel.grid.minor.y = element_line(color = "gray96"),
+        panel.grid.major.x = element_blank(),
+        legend.position    = "none")
+gg_gaussian
+
+
+# 2) effects of log Gaussian and Gamma models
+ylim_logInt <- c(.6,1.4)
+plot_dat_exp <- results_dat %>% 
+  filter(grepl("acid", model),
+         model_type  != "Gaussian",
+         param_group == "intervention") %>% 
+  mutate(parameter = factor(parameter, levels = c("interventionFresh", "interventionPasteurized"),
+                            labels = c("fresh intervention", "pasteurized intervention")),
+         model     = factor(model, levels = levels(model),
+                            labels = levels(model) %>% gsub(pattern = " \\(Stool)", replacement = "")))
+gg_exp <- plot_dat_exp %>% 
+  ggplot(aes(x = model, y = exp_estimate, color = model_group)) +
+  geom_hline(yintercept = 1, linetype = 2, col = "gray30") +
+  geom_pointrange(aes(ymin = exp_CIlower, ymax = exp_CIupper)) +
+  geom_point() +
+  scale_y_continuous("estimate, on log2 scale", trans = "log2", limits = ylim_logInt,
+                     breaks = c(.6, .8, 1, 1.2, 1.4),
+                     labels = c("-40%", "-20%", "0", "+20%", "+40%"),
+                     minor_breaks = c(.7, .9, 1.1, 1.3)) +
+  scale_color_manual(values = col_vector) +
+  facet_wrap(~ parameter) +
+  ggtitle("Intervention effects in log Gaussian and Gamma models", "with uncorrected 95% confidence intervals") +
+  theme(axis.text.x        = element_text(hjust = 1, angle = 45),
+        axis.title.x       = element_blank(),
+        panel.grid.minor.y = element_line(color = "gray96"),
+        panel.grid.major.x = element_blank(),
+        legend.position    = "none")
+gg_exp
+```
+
+
+## Phase, gender, age and BMI effects
+
+```{r}
+#| fig.width: 8
+#| fig.height: 5
+
+# 1) effects of Gaussian models
+ylim_gaussian <- c(-1,1) * max(abs(c(results_dat$CI_lower_standardized[results_dat$parameter != "(Intercept)"],
+                                     results_dat$CI_upper_standardized[results_dat$parameter != "(Intercept)"])), na.rm = TRUE)
+results_dat %>% 
+  filter(model_type  == "Gaussian",
+         param_group %in% c("phase", "gender", "age", "BMI")) %>% 
+  mutate(parameter = factor(parameter, levels = c("phasephase 2", "genderW", "age_centered50", "bmi_centered25"))) %>% 
+  ggplot(aes(x = model, y = estimate_standardized, color = model_group)) +
+  geom_hline(yintercept = 0, linetype = 2, col = "gray30") +
+  geom_pointrange(aes(ymin = CI_lower_standardized, ymax = CI_upper_standardized)) +
+  geom_point() +
+  ylim(ylim_gaussian) +
+  scale_color_manual(values = col_vector) +
+  facet_wrap(~ parameter) +
+  ggtitle("Covariate effects in Gaussian models", "with uncorrected 95% confidence intervals") +
+  theme(axis.text.x     = element_text(hjust = 1, angle = 45),
+        axis.title.x    = element_blank(),
+        legend.position = "none")
+
+
+# 2) effects of log Gaussian and Gamma models
+ylim_log <- c(min(results_dat$exp_CIlower[results_dat$parameter != "(Intercept)"], na.rm = TRUE),
+              max(results_dat$exp_CIupper[results_dat$parameter != "(Intercept)"], na.rm = TRUE))
+results_dat %>% 
+  filter(model_type  != "Gaussian",
+         param_group %in% c("phase", "gender", "age", "BMI")) %>% 
+  mutate(parameter = factor(parameter, levels = c("phasephase 2", "genderW", "age_centered50", "bmi_centered25"))) %>% 
+  ggplot(aes(x = model, y = exp_estimate, color = model_group)) +
+  geom_hline(yintercept = 1, linetype = 2, col = "gray30") +
+  geom_pointrange(aes(ymin = exp_CIlower, ymax = exp_CIupper)) +
+  geom_point() +
+  scale_y_continuous("exponentiated estimate on log2 scale", trans = "log2", limits = ylim_log) +
+  scale_color_manual(values = col_vector) +
+  facet_wrap(~ parameter) +
+  ggtitle("Covariate effects in log Gaussian and Gamma models", "with uncorrected 95% confidence intervals") +
+  theme(axis.text.x     = element_text(hjust = 1, angle = 45),
+        axis.title.x    = element_blank(),
+        legend.position = "none")
+```
+
+## Interactions: Intervention by sex
+
+```{r}
+# create a results table with all effects
+modelResults_sexInt_list <- lapply(names(model_names), function(x) {
+
+  variable         <- model_names[x] %>% unname()
+  model            <- model_sexInt_list[[x]][[1]]
+  model_changedRef <- model_sexInt_list[[x]][[2]]
+  model_type       <- modelType_list[[x]]
+
+  log_wasApplied <- (model_type %in% c("Gamma", "log Gaussian"))
+
+  results_dat1 <- summary(model)$p.table %>% as.data.frame() %>%
+    mutate(parameter   = row.names(.)) %>%
+    filter(grepl("intervention", parameter),
+           !grepl(":", parameter)) %>% 
+    mutate(gender = levels(dat_model$gender)[1])
+  results_dat2 <- summary(model_changedRef)$p.table %>% as.data.frame() %>%
+    mutate(parameter   = row.names(.)) %>%
+    filter(grepl("intervention", parameter),
+           !grepl(":", parameter)) %>% 
+    mutate(gender = levels(dat_model$gender)[2])
+  results_dat <- results_dat1 %>% dplyr::bind_rows(results_dat2) %>% 
+    dplyr::rename(estimate   = "Estimate",
+                  se         = "Std. Error",
+                  pvalue     = "Pr(>|t|)") %>%
+    mutate(model      = x,
+           model_type = model_type,
+           CI_lower   = estimate - qnorm(0.975) * se,
+           CI_upper   = estimate + qnorm(0.975) * se)
+
+  if (!log_wasApplied) { # standardize the effects by the standard deviation of the respnse variable
+    results_dat <- results_dat %>%
+      mutate(y_sd = sd(dat_model[[variable]], na.rm = TRUE),
+             estimate_standardized = estimate / y_sd,
+             se_standardized       = se / y_sd,
+             CI_lower_standardized = estimate_standardized - qnorm(0.975) * se_standardized,
+             CI_upper_standardized = estimate_standardized + qnorm(0.975) * se_standardized)
+
+  } else { # exponentiate the effects
+    results_dat <- results_dat %>%
+      mutate(exp_estimate = exp(estimate),
+             exp_CIlower  = exp(CI_lower),
+             exp_CIupper  = exp(CI_upper))
+  }
+
+  results_dat <- results_dat %>%
+    select(model, model_type, gender, parameter, estimate, CI_lower, CI_upper, contains("standardized"), contains("exp"), pvalue)
+  row.names(results_dat) <- NULL
+
+  return(results_dat)
+})
+results_dat_sexInt <- modelResults_sexInt_list %>% bind_rows() %>%
+  mutate(model       = factor(model, levels = names(model_names)),
+         model_group = case_when(model %in% names(SCFA_markers) ~ "scfa",
+                                 TRUE                           ~ "bcfa"),
+         model_group  = factor(model_group, levels = names(col_vector)),
+         xCoord_shift = case_when(gender == min(gender) ~ -0.15,
+                                  TRUE                  ~ 0.15))
+```
+
+```{r}
+#| fig.width: 8
+#| fig.height: 5
+
+# 1) effects of Gaussian models
+plot_dat <- results_dat_sexInt %>% 
+  filter(model_type  == "Gaussian") %>% 
+  mutate(parameter = factor(parameter, levels = c("interventionFresh", "interventionPasteurized"),
+                            labels = c("fresh intervention", "pasteurized intervention")),
+         model     = droplevels(model),
+         model     = factor(model, levels = levels(model),
+                            labels = levels(model) %>% gsub(pattern = " \\(Stool)", replacement = "")),
+         model_xCoord = as.numeric(model) + xCoord_shift)
+
+ylim_gaussianInt <- c(-.8, .8)
+gg_gaussian_sexInt <- plot_dat %>% 
+  filter(grepl("acid", model)) %>% 
+  ggplot(aes(x = model_xCoord, y = estimate_standardized, color = model_group, fill = model_group)) +
+  geom_hline(yintercept = 0, linetype = 2, col = "gray30") +
+  geom_pointrange(aes(ymin = CI_lower_standardized, ymax = CI_upper_standardized, shape = gender), size = 0.25) +
+  scale_x_continuous(breaks = 1:length(levels(plot_dat$model)), labels = levels(plot_dat$model)) +
+  scale_y_continuous("standardized estimate", limits = ylim_gaussianInt,
+                     breaks = c(-.8,-.4,0,.4,.8),
+                     labels = c("-0.8", "-0.4", "0", "+0.4", "+0.8")) +
+  scale_color_manual(values = col_vector, guide = "none") +
+  scale_fill_manual(values = col_vector, guide = "none") +
+  scale_shape_manual("sex", values = c(25,24)) +
+  facet_wrap(~ parameter) +
+  ggtitle("sex-specific Intervention effects in Gaussian models", "with uncorrected 95% confidence intervals") +
+  theme(axis.text.x        = element_text(hjust = 1, angle = 45),
+        axis.title.x       = element_blank(),
+        panel.grid.minor.y = element_line(color = "gray96"),
+        panel.grid.major.x = element_blank(),
+        legend.position    = "bottom")
+gg_gaussian_sexInt
+
+
+# 2) effects of log Gaussian and Gamma models
+plot_dat <- results_dat_sexInt %>% 
+  filter(model_type  != "Gaussian") %>% 
+  mutate(parameter = factor(parameter, levels = c("interventionFresh", "interventionPasteurized"),
+                            labels = c("fresh intervention", "pasteurized intervention")),
+         model     = droplevels(model),
+         model     = factor(model, levels = levels(model),
+                            labels = levels(model) %>% gsub(pattern = " \\(Stool)", replacement = "")),
+         model_xCoord = as.numeric(model) + xCoord_shift)
+
+ylim_logInt <- c(.5,1.6)
+gg_exp_sexInt <- plot_dat %>% 
+  filter(grepl("acid", model)) %>% 
+  ggplot(aes(x = model_xCoord, y = exp_estimate, color = model_group, fill = model_group)) +
+  geom_hline(yintercept = 1, linetype = 2, col = "gray30") +
+  geom_pointrange(aes(ymin = exp_CIlower, ymax = exp_CIupper, shape = gender), size = 0.25) +
+  scale_x_continuous(breaks = 1:length(levels(plot_dat$model)), labels = levels(plot_dat$model)) +
+  scale_y_continuous("estimate, on log2 scale", trans = "log2", limits = ylim_logInt,
+                     breaks = c(.6, .8, 1, 1.2, 1.4, 1.6),
+                     labels = c("-40%", "-20%", "0", "+20%", "+40%", "+60%"),
+                     minor_breaks = c(.5, .7, .9, 1.1, 1.3, 1.5)) +
+  scale_color_manual(values = col_vector, guide = "none") +
+  scale_fill_manual(values = col_vector, guide = "none") +
+  scale_shape_manual("sex", values = c(25,24)) +
+  facet_wrap(~ parameter) +
+  ggtitle("sex-specific Intervention effects in log Gaussian and Gamma models", "with uncorrected 95% confidence intervals") +
+  theme(axis.text.x        = element_text(hjust = 1, angle = 45),
+        axis.title.x       = element_blank(),
+        panel.grid.minor.y = element_line(color = "gray96"),
+        panel.grid.major.x = element_blank(),
+        legend.position    = "bottom")
+gg_exp_sexInt
+```
+
+
+## Interactions: Intervention by age
+
+```{r}
+# create a results table with all effects
+modelResults_ageInt_list <- lapply(names(model_names), function(x) {
+
+  variable         <- model_names[x] %>% unname()
+  model            <- model_ageInt_list[[x]][[1]]
+  model_changedRef <- model_ageInt_list[[x]][[2]]
+  model_type       <- modelType_list[[x]]
+
+  log_wasApplied <- (model_type %in% c("Gamma", "log Gaussian"))
+
+  results_dat1 <- summary(model)$p.table %>% as.data.frame() %>%
+    mutate(parameter   = row.names(.)) %>%
+    filter(grepl("intervention", parameter),
+           !grepl(":", parameter)) %>% 
+    mutate(age_group = levels(dat_model$age_cat)[1])
+  results_dat2 <- summary(model_changedRef)$p.table %>% as.data.frame() %>%
+    mutate(parameter   = row.names(.)) %>%
+    filter(grepl("intervention", parameter),
+           !grepl(":", parameter)) %>% 
+    mutate(age_group = levels(dat_model$age_cat)[2])
+  results_dat <- results_dat1 %>% dplyr::bind_rows(results_dat2) %>% 
+    dplyr::rename(estimate   = "Estimate",
+                  se         = "Std. Error",
+                  pvalue     = "Pr(>|t|)") %>%
+    mutate(model      = x,
+           model_type = model_type,
+           CI_lower   = estimate - qnorm(0.975) * se,
+           CI_upper   = estimate + qnorm(0.975) * se)
+
+  if (!log_wasApplied) { # standardize the effects by the standard deviation of the respnse variable
+    results_dat <- results_dat %>%
+      mutate(y_sd = sd(dat_model[[variable]], na.rm = TRUE),
+             estimate_standardized = estimate / y_sd,
+             se_standardized       = se / y_sd,
+             CI_lower_standardized = estimate_standardized - qnorm(0.975) * se_standardized,
+             CI_upper_standardized = estimate_standardized + qnorm(0.975) * se_standardized)
+
+  } else { # exponentiate the effects
+    results_dat <- results_dat %>%
+      mutate(exp_estimate = exp(estimate),
+             exp_CIlower  = exp(CI_lower),
+             exp_CIupper  = exp(CI_upper))
+  }
+
+  results_dat <- results_dat %>%
+    select(model, model_type, age_group, parameter, estimate, CI_lower, CI_upper, contains("standardized"), contains("exp"), pvalue)
+  row.names(results_dat) <- NULL
+
+  return(results_dat)
+})
+results_dat_ageInt <- modelResults_ageInt_list %>% bind_rows() %>%
+  mutate(model       = factor(model, levels = names(model_names)),
+         model_group = case_when(model %in% names(SCFA_markers) ~ "scfa",
+                                 TRUE                           ~ "bcfa"),
+         model_group  = factor(model_group, levels = names(col_vector)),
+         xCoord_shift = case_when(age_group == min(age_group) ~ -0.15,
+                                  TRUE                        ~ 0.15))
+```
+
+```{r}
+#| fig.width: 8
+#| fig.height: 5
+
+# 1) effects of Gaussian models
+plot_dat <- results_dat_ageInt %>% 
+  filter(model_type  == "Gaussian") %>% 
+  mutate(parameter = factor(parameter, levels = c("interventionFresh", "interventionPasteurized"),
+                            labels = c("fresh intervention", "pasteurized intervention")),
+         model     = droplevels(model),
+         model     = factor(model, levels = levels(model),
+                            labels = levels(model) %>% gsub(pattern = " \\(Stool)", replacement = "")),
+         model_xCoord = as.numeric(model) + xCoord_shift)
+
+ylim_gaussianInt <- c(-.8, .8)
+gg_gaussian_ageInt <- plot_dat %>% 
+  filter(grepl("acid", model)) %>% 
+  ggplot(aes(x = model_xCoord, y = estimate_standardized, color = model_group, fill = model_group)) +
+  geom_hline(yintercept = 0, linetype = 2, col = "gray30") +
+  geom_pointrange(aes(ymin = CI_lower_standardized, ymax = CI_upper_standardized, shape = age_group), size = 0.25) +
+  scale_x_continuous(breaks = 1:length(levels(plot_dat$model)), labels = levels(plot_dat$model)) +
+  scale_y_continuous("standardized estimate", limits = ylim_gaussianInt,
+                     breaks = c(-.8,-.4,0,.4,.8),
+                     labels = c("-0.8", "-0.4", "0", "+0.4", "+0.8")) +
+  scale_color_manual(values = col_vector, guide = "none") +
+  scale_fill_manual(values = col_vector, guide = "none") +
+  scale_shape_manual("age group", values = c(25,24)) +
+  facet_wrap(~ parameter) +
+  ggtitle("age-specific Intervention effects in Gaussian models", "with uncorrected 95% confidence intervals") +
+  theme(axis.text.x        = element_text(hjust = 1, angle = 45),
+        axis.title.x       = element_blank(),
+        panel.grid.minor.y = element_line(color = "gray96"),
+        panel.grid.major.x = element_blank(),
+        legend.position    = "bottom")
+gg_gaussian_ageInt
+
+
+
+# 2) effects of log Gaussian and Gamma models
+plot_dat <- results_dat_ageInt %>% 
+  filter(model_type  != "Gaussian") %>% 
+  mutate(parameter = factor(parameter, levels = c("interventionFresh", "interventionPasteurized"),
+                            labels = c("fresh intervention", "pasteurized intervention")),
+         model     = droplevels(model),
+         model     = factor(model, levels = levels(model),
+                            labels = levels(model) %>% gsub(pattern = " \\(Stool)", replacement = "")),
+         model_xCoord = as.numeric(model) + xCoord_shift)
+
+ylim_logInt <- c(.5,1.5)
+gg_exp_ageInt <- plot_dat %>% 
+  filter(grepl("acid", model)) %>% 
+  ggplot(aes(x = model_xCoord, y = exp_estimate, color = model_group, fill = model_group)) +
+  geom_hline(yintercept = 1, linetype = 2, col = "gray30") +
+  geom_pointrange(aes(ymin = exp_CIlower, ymax = exp_CIupper, shape = age_group), size = 0.25) +
+  scale_x_continuous(breaks = 1:length(levels(plot_dat$model)), labels = levels(plot_dat$model)) +
+  scale_y_continuous("estimate, on log2 scale", trans = "log2", limits = ylim_logInt,
+                     breaks = c(.6, .8, 1, 1.2, 1.4),
+                     labels = c("-40%", "-20%", "0", "+20%", "+40%"),
+                     minor_breaks = c(.5, .7, .9, 1.1, 1.3, 1.5)) +
+  scale_color_manual(values = col_vector, guide = "none") +
+  scale_fill_manual(values = col_vector, guide = "none") +
+  scale_shape_manual("age group", values = c(25,24)) +
+  facet_wrap(~ parameter) +
+  ggtitle("age-specific Intervention effects in log Gaussian and Gamma models", "with uncorrected 95% confidence intervals") +
+  theme(axis.text.x        = element_text(hjust = 1, angle = 45),
+        axis.title.x       = element_blank(),
+        panel.grid.minor.y = element_line(color = "gray96"),
+        panel.grid.major.x = element_blank(),
+        legend.position    = "bottom")
+gg_exp_ageInt
+```
+
+
+## Interactions: Intervention by BMI
+
+```{r}
+# create a results table with all effects
+modelResults_bmiInt_list <- lapply(names(model_names), function(x) {
+  
+  variable         <- model_names[x] %>% unname()
+  model            <- model_bmiInt_list[[x]][[1]]
+  model_changedRef <- model_bmiInt_list[[x]][[2]]
+  model_type       <- modelType_list[[x]]
+
+  log_wasApplied <- (model_type %in% c("Gamma", "log Gaussian"))
+
+  results_dat1 <- summary(model)$p.table %>% as.data.frame() %>%
+    mutate(parameter   = row.names(.)) %>%
+    filter(grepl("intervention", parameter),
+           !grepl(":", parameter)) %>% 
+    mutate(bmi_group = levels(dat_model$bmi_cat)[1])
+  results_dat2 <- summary(model_changedRef)$p.table %>% as.data.frame() %>%
+    mutate(parameter   = row.names(.)) %>%
+    filter(grepl("intervention", parameter),
+           !grepl(":", parameter)) %>% 
+    mutate(bmi_group = levels(dat_model$bmi_cat)[2])
+  results_dat <- results_dat1 %>% dplyr::bind_rows(results_dat2) %>% 
+    dplyr::rename(estimate   = "Estimate",
+                  se         = "Std. Error",
+                  pvalue     = "Pr(>|t|)") %>%
+    mutate(model      = x,
+           model_type = model_type,
+           CI_lower   = estimate - qnorm(0.975) * se,
+           CI_upper   = estimate + qnorm(0.975) * se)
+
+  if (!log_wasApplied) { # standardize the effects by the standard deviation of the respnse variable
+    results_dat <- results_dat %>%
+      mutate(y_sd = sd(dat_model[[variable]], na.rm = TRUE),
+             estimate_standardized = estimate / y_sd,
+             se_standardized       = se / y_sd,
+             CI_lower_standardized = estimate_standardized - qnorm(0.975) * se_standardized,
+             CI_upper_standardized = estimate_standardized + qnorm(0.975) * se_standardized)
+
+  } else { # exponentiate the effects
+    results_dat <- results_dat %>%
+      mutate(exp_estimate = exp(estimate),
+             exp_CIlower  = exp(CI_lower),
+             exp_CIupper  = exp(CI_upper))
+  }
+
+  results_dat <- results_dat %>%
+    select(model, model_type, bmi_group, parameter, estimate, CI_lower, CI_upper, contains("standardized"), contains("exp"), pvalue)
+  row.names(results_dat) <- NULL
+
+  return(results_dat)
+})
+results_dat_bmiInt <- modelResults_bmiInt_list %>% bind_rows() %>%
+  mutate(model       = factor(model, levels = names(model_names)),
+         model_group = case_when(model %in% names(SCFA_markers) ~ "scfa",
+                                 TRUE                           ~ "bcfa"),
+         model_group  = factor(model_group, levels = names(col_vector)),
+         xCoord_shift = case_when(bmi_group == min(bmi_group) ~ -0.15,
+                                  TRUE                        ~ 0.15))
+```
+
+```{r}
+#| fig.width: 8
+#| fig.height: 5
+
+# 1) effects of Gaussian models
+plot_dat <- results_dat_bmiInt %>% 
+  filter(model_type  == "Gaussian") %>% 
+  mutate(parameter = factor(parameter, levels = c("interventionFresh", "interventionPasteurized"),
+                            labels = c("fresh intervention", "pasteurized intervention")),
+         model     = droplevels(model),
+         model     = factor(model, levels = levels(model),
+                            labels = levels(model) %>% gsub(pattern = " \\(Stool)", replacement = "")),
+         model_xCoord = as.numeric(model) + xCoord_shift)
+
+ylim_gaussianInt <- c(-.8, .8)
+gg_gaussian_bmiInt <- plot_dat %>% 
+  filter(grepl("acid", model)) %>% 
+  ggplot(aes(x = model_xCoord, y = estimate_standardized, color = model_group, fill = model_group)) +
+  geom_hline(yintercept = 0, linetype = 2, col = "gray30") +
+  geom_pointrange(aes(ymin = CI_lower_standardized, ymax = CI_upper_standardized, shape = bmi_group), size = 0.25) +
+  scale_x_continuous(breaks = 1:length(levels(plot_dat$model)), labels = levels(plot_dat$model)) +
+  scale_y_continuous("standardized estimate", limits = ylim_gaussianInt,
+                     breaks = c(-.8,-.4,0,.4,.8),
+                     labels = c("-0.8", "-0.4", "0", "+0.4", "+0.8")) +
+  scale_color_manual(values = col_vector, guide = "none") +
+  scale_fill_manual(values = col_vector, guide = "none") +
+  scale_shape_manual("BMI group", values = c(25,24)) +
+  facet_wrap(~ parameter) +
+  ggtitle("BMI-specific Intervention effects in Gaussian models", "with uncorrected 95% confidence intervals") +
+  theme(axis.text.x        = element_text(hjust = 1, angle = 45),
+        axis.title.x       = element_blank(),
+        panel.grid.minor.y = element_line(color = "gray96"),
+        panel.grid.major.x = element_blank(),
+        legend.position    = "bottom")
+gg_gaussian_bmiInt
+
+
+
+# 2) effects of log Gaussian and Gamma models
+plot_dat <- results_dat_bmiInt %>% 
+  filter(model_type  != "Gaussian") %>% 
+  mutate(parameter = factor(parameter, levels = c("interventionFresh", "interventionPasteurized"),
+                            labels = c("fresh intervention", "pasteurized intervention")),
+         model     = droplevels(model),
+         model     = factor(model, levels = levels(model),
+                            labels = levels(model) %>% gsub(pattern = " \\(Stool)", replacement = "")),
+         model_xCoord = as.numeric(model) + xCoord_shift)
+
+ylim_logInt <- c(.5,2)
+gg_exp_bmiInt <- plot_dat %>% 
+  filter(grepl("acid", model)) %>% 
+  ggplot(aes(x = model_xCoord, y = exp_estimate, color = model_group, fill = model_group)) +
+  geom_hline(yintercept = 1, linetype = 2, col = "gray30") +
+  geom_pointrange(aes(ymin = exp_CIlower, ymax = exp_CIupper, shape = bmi_group), size = 0.25) +
+  scale_x_continuous(breaks = 1:length(levels(plot_dat$model)), labels = levels(plot_dat$model)) +
+  scale_y_continuous("estimate, on log2 scale", trans = "log2", limits = ylim_logInt,
+                     breaks = c(.6, .8, 1, 1.2, 1.4, 1.6, 1.8, 2),
+                     labels = c("-40%", "-20%", "0", "+20%", "+40%", "+60%", "+80%", "+100%"),
+                     minor_breaks = c(.5, .7, .9, 1.1, 1.3, 1.5, 1.7, 1.9)) +
+  scale_color_manual(values = col_vector, guide = "none") +
+  scale_fill_manual(values = col_vector, guide = "none") +
+  scale_shape_manual("BMI group", values = c(25,24)) +
+  facet_wrap(~ parameter) +
+  ggtitle("BMI-specific Intervention effects in log Gaussian and Gamma models", "with uncorrected 95% confidence intervals") +
+  theme(axis.text.x        = element_text(hjust = 1, angle = 45),
+        axis.title.x       = element_blank(),
+        panel.grid.minor.y = element_line(color = "gray96"),
+        panel.grid.major.x = element_blank(),
+        legend.position    = "bottom")
+gg_exp_bmiInt
+```
+
+
+# Corrected p-values for intervention effects
+
+Correct for multiple testing by applying the Benjamini-Hochberg correction to all intervention effects.
+
+```{r}
+results_dat_interventions <- results_dat %>% 
+  filter(grepl("intervention", parameter)) %>% 
+  mutate(pvalue_corrected   = p.adjust(pvalue, method = "BH") %>% round(4),
+         pvalue_significant = ifelse(pvalue_corrected < 0.1, "yes", "no"))
+
+results_dat_interventions %>% 
+  select(model, model_type, parameter, pvalue_corrected, pvalue_significant) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+
+# Corrected p-values for interaction effects
+
+For the interaction effects, correct for multiple testing by applying the Benjamini-Hochberg correction.
+The correction is applied individually, once for the sex / the age / the BMI interaction models.
+
+```{r}
+# sex
+results_dat_sexInt <- results_dat_sexInt %>% 
+  mutate(pvalue_corrected   = p.adjust(pvalue, method = "BH") %>% round(4),
+         pvalue_significant = ifelse(pvalue_corrected < 0.1, "yes", "no"))
+
+results_dat_sexInt %>% 
+  select(model, model_type, gender, parameter, pvalue_corrected, pvalue_significant) %>% 
+  kable() %>% 
+  kable_styling()
+
+# age
+results_dat_ageInt <- results_dat_ageInt %>% 
+  mutate(pvalue_corrected   = p.adjust(pvalue, method = "BH") %>% round(4),
+         pvalue_significant = ifelse(pvalue_corrected < 0.1, "yes", "no"))
+
+results_dat_ageInt %>% 
+  select(model, model_type, age_group, parameter, pvalue_corrected, pvalue_significant) %>% 
+  kable() %>% 
+  kable_styling()
+
+# BMI
+results_dat_bmiInt <- results_dat_bmiInt %>% 
+  mutate(pvalue_corrected   = p.adjust(pvalue, method = "BH") %>% round(4),
+         pvalue_significant = ifelse(pvalue_corrected < 0.1, "yes", "no"))
+
+results_dat_bmiInt %>% 
+  select(model, model_type, bmi_group, parameter, pvalue_corrected, pvalue_significant) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+
+# Figures for publication
+
+```{r}
+#| column: page
+#| fig-width: 16
+
+# save the results datasets, to be able to jointly plot blood and stool results in the blood document
+# write.csv(results_dat, file = "9_resultsDat_stoolSCFAmodels.csv", row.names = FALSE)
+# write.csv(results_dat_ageInt, file = "9_resultsDat_ageInt_stoolSCFAmodels.csv", row.names = FALSE)
+# write.csv(results_dat_sexInt, file = "9_resultsDat_sexInt_stoolSCFAmodels.csv", row.names = FALSE)
+# write.csv(results_dat_bmiInt, file = "9_resultsDat_bmiInt_stoolSCFAmodels.csv", row.names = FALSE)
+
+# 1) main model results
+(gg_gaussian + gg_exp) + patchwork::plot_layout(nrow = 1, widths = c(.33,.67))
+# ggsave("modelResults_stoolSCFAs.png", width = 13, height = 4)
+
+# 2) interactions with gender
+(gg_gaussian_sexInt + gg_exp_sexInt) + patchwork::plot_layout(nrow = 1, widths = c(.33,.67))
+# ggsave("modelResults_sexInteraction_stoolSCFAs.png", width = 14, height = 4)
+
+# 3) interactions with age
+(gg_gaussian_ageInt + gg_exp_ageInt) + patchwork::plot_layout(nrow = 1, widths = c(.33,.67))
+# ggsave("modelResults_ageInteraction_stoolSCFAs.png", width = 14, height = 4)
+
+# 4) interactions with age
+(gg_gaussian_bmiInt + gg_exp_bmiInt) + patchwork::plot_layout(nrow = 1, widths = c(.33,.67))
+# ggsave("modelResults_bmiInteraction_stoolSCFAs.png", width = 14, height = 4)
+```
+
+
+# Descriptive response patterns: Compare how the target parameters change per person
+
+## SCFA / BCFA
+
+```{r}
+#| column: page
+
+# per person and period, add a variable indicating how the markers changed
+dat_change <- dat_model %>% 
+  arrange(participant_id, timepoint) %>% 
+  group_by(participant_id, period) %>% 
+  filter(n() == 2) %>% 
+  mutate(methylbutyric_acid2_diff = diff(stool_methylbutyricAcid),
+         acetic_acid_diff         = diff(stool_aceticAcid),
+         butyric_acid_diff        = diff(stool_butyricAcid),
+         hexanoic_acid_diff       = diff(stool_hexanoicAcid),
+         isobutyric_acid_diff     = diff(stool_isobutyricAcid),
+         isovaleric_acid_diff     = diff(stool_isovalericAcid),
+         propionic_acid_diff      = diff(stool_propionicAcid),
+         valeric_acid_diff        = diff(stool_valericAcid)) %>% 
+  slice(2) %>% 
+  ungroup() %>% 
+  mutate(MBacid    = case_when(methylbutyric_acid2_diff >= 0 ~ "bad (increasing)",
+                               methylbutyric_acid2_diff <  0 ~ "good (decreasing)"),
+         ACacid    = case_when(acetic_acid_diff         >= 0 ~ "bad (increasing)",
+                               acetic_acid_diff         <  0 ~ "good (decreasing)"),
+         BTacid    = case_when(butyric_acid_diff        >= 0 ~ "bad (increasing)",
+                               butyric_acid_diff        <  0 ~ "good (decreasing)"),
+         HXacid    = case_when(hexanoic_acid_diff       >= 0 ~ "bad (increasing)",
+                               hexanoic_acid_diff       <  0 ~ "good (decreasing)"),
+         isoBTacid = case_when(isobutyric_acid_diff     >= 0 ~ "bad (increasing)",
+                               isobutyric_acid_diff     <  0 ~ "good (decreasing)"),
+         isoVLacid = case_when(isovaleric_acid_diff     >= 0 ~ "bad (increasing)",
+                               isovaleric_acid_diff     <  0 ~ "good (decreasing)"),
+         PPacid    = case_when(propionic_acid_diff      >= 0 ~ "bad (increasing)",
+                               propionic_acid_diff      <  0 ~ "good (decreasing)"),
+         VLacid    = case_when(valeric_acid_diff        >= 0 ~ "bad (increasing)",
+                               valeric_acid_diff        <  0 ~ "good (decrasing)"))
+
+
+# add a variable defining the change pattern, and create a frequency table of it
+tab_change <- dat_change %>% 
+  mutate(acid_changePattern = paste(MBacid, ACacid, BTacid, HXacid, isoBTacid, isoVLacid, PPacid, VLacid)) %>% 
+  group_by(acid_changePattern) %>% 
+  summarize(MBacid              = first(MBacid),
+            ACacid              = first(ACacid),
+            BTacid              = first(BTacid),
+            HXacid              = first(HXacid),
+            isoBTacid           = first(isoBTacid),
+            isoVLacid           = first(isoVLacid),
+            PPacid              = first(PPacid),
+            VLacid              = first(VLacid),
+            N_freshIntervention = sum(intervention == "Fresh"),
+            N_pastIntervention  = sum(intervention == "Pasteurized")) %>% 
+  ungroup() %>% 
+  mutate(fake_rowGrouping = 1:nrow(.)) %>% 
+  group_by(fake_rowGrouping) %>% 
+  mutate(pattern = case_when(length(strsplit(acid_changePattern, "good")[[1]]) == 9 ~ "8/8 good",
+                             length(strsplit(acid_changePattern, "good")[[1]]) == 8 ~ "7/8 good",
+                             length(strsplit(acid_changePattern, "good")[[1]]) == 7 ~ "6/8 good",
+                             length(strsplit(acid_changePattern, "good")[[1]]) == 6 ~ "5/8 good",
+                             length(strsplit(acid_changePattern, "good")[[1]]) == 5 ~ "4/8 good",
+                             length(strsplit(acid_changePattern, "good")[[1]]) == 4 ~ "3/8 good",
+                             length(strsplit(acid_changePattern, "good")[[1]]) == 3 ~ "2/8 good",
+                             length(strsplit(acid_changePattern, "good")[[1]]) == 2 ~ "1/8 good",
+                             TRUE                                                   ~ "0/8 good"),
+         pattern = factor(pattern, levels = c("8/8 good", "7/8 good", "6/8 good", "5/8 good", "4/8 good",
+                                              "3/8 good", "2/8 good", "1/8 good", "0/8 good"))) %>% 
+  ungroup() %>% 
+  arrange(pattern, acid_changePattern) %>% 
+  select(-acid_changePattern, -fake_rowGrouping) %>% 
+  select(pattern, everything())
+  
+# print the table (summarized form)
+tab_change %>% 
+  group_by(pattern) %>% 
+  summarize(N_freshIntervention = sum(N_freshIntervention),
+            N_pastIntervention  = sum(N_pastIntervention)) %>% 
+  kable() %>% 
+  kable_styling()
+
+# print the table (detailed form)
+tab_change %>% 
+  mutate(MBacid    = cell_spec(MBacid,    background = ifelse(grepl("good", MBacid),    "#92C7CF", "#E6A4B4")),
+         ACacid    = cell_spec(ACacid,    background = ifelse(grepl("good", ACacid),    "#92C7CF", "#E6A4B4")),
+         BTacid    = cell_spec(BTacid,    background = ifelse(grepl("good", BTacid),    "#92C7CF", "#E6A4B4")),
+         HXacid    = cell_spec(HXacid,    background = ifelse(grepl("good", HXacid),    "#92C7CF", "#E6A4B4")),
+         isoBTacid = cell_spec(isoBTacid, background = ifelse(grepl("good", isoBTacid), "#92C7CF", "#E6A4B4")),
+         isoVLacid = cell_spec(isoVLacid, background = ifelse(grepl("good", isoVLacid), "#92C7CF", "#E6A4B4")),
+         PPacid    = cell_spec(PPacid,    background = ifelse(grepl("good", PPacid),    "#92C7CF", "#E6A4B4")),
+         VLacid    = cell_spec(VLacid,    background = ifelse(grepl("good", VLacid),    "#92C7CF", "#E6A4B4"))) %>% 
+  kable(escape = FALSE) %>% 
+  kable_styling()
+```

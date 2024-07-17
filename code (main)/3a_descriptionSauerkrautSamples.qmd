@@ -1,0 +1,336 @@
+---
+title: "Description Sauerkraut Samples"
+format:
+  html:
+    toc: true
+    code-fold: true
+    self-contained: true
+---
+
+## Data preparation
+
+```{r packages}
+#| warning: false
+
+library(sauerkrautTaxonomyBuddy)
+
+library(dplyr)        # data handling
+library(tidyr)        # data transformation
+library(ggplot2)      # data visualization
+library(RColorBrewer) # colors
+library(knitr)        # table printing
+library(kableExtra)   # further table formatting
+
+# set ggplot2 theme
+theme_set(
+  theme_minimal() +
+    theme(plot.background  = element_rect(fill = "white", color = "white"),
+          plot.title       = element_text(hjust = 0.5)))
+
+# hide NA values from kable tables
+options(knitr.kable.NA = '')
+```
+
+```{r read data}
+#| message: false
+
+define_dataPaths()
+
+# prepare datasets on species level
+datList_tax <- readAndPrepare_taxonomy(path_taxonomyData        = path_relTaxonomyData,
+                                       path_sampleLookupXlsx    = path_sampleLookupXlsx,
+                                       path_krautLookupXlsx     = path_krautLookupXlsx,
+                                       aggregation_level        = "species",
+                                       exclude_sickParticipants = "taxonomy paper")
+dat_kraut  <- datList_tax$dat_krautSamples
+dat_lookup <- datList_tax$dat_lookupKraut
+rm(datList_tax)
+
+# prepare datasets on bacteria strain level
+datList_strainTax <- readAndPrepare_taxonomy(path_taxonomyData        = path_relTaxonomyData,
+                                             path_sampleLookupXlsx    = path_sampleLookupXlsx,
+                                             path_krautLookupXlsx     = path_krautLookupXlsx,
+                                             aggregation_level        = "strain",
+                                             exclude_sickParticipants = "taxonomy paper")
+dat_krautStrain  <- datList_strainTax$dat_krautSamples
+rm(datList_strainTax)
+```
+
+```{r data prep}
+# create one long dataset with all relevant information, on species level
+dat <- dat_kraut %>% 
+  pivot_longer(cols         = starts_with("sample"),
+               names_to     = "sample",
+               names_prefix = "sample_") %>% 
+  dplyr::left_join(dat_lookup, by = c("sample" = "sample_id")) %>% 
+  mutate(across(starts_with("species"), droplevels)) %>% 
+  arrange(sample_glass, sample_description) %>% 
+  mutate(sample_description = factor(sample_description, levels = unique(as.character(sample_description))))
+
+# create one long dataset with all relevant information, on bacteria strain level
+dat_strain <- dat_krautStrain %>% 
+  pivot_longer(cols         = starts_with("sample"),
+               names_to     = "sample",
+               names_prefix = "sample_") %>% 
+  dplyr::left_join(dat_lookup, by = c("sample" = "sample_id")) %>% 
+  mutate(across(starts_with("strain"), droplevels)) %>% 
+  arrange(sample_glass, sample_description) %>% 
+  mutate(sample_description = factor(sample_description, levels = unique(as.character(sample_description))))
+```
+
+```{r}
+### read the 'estimated number of reads from the clade' information from the sauerkraut files, on species level
+
+# extract the sauerkraut sample files
+path_files        <- "Q:/IPE-P-Sauerkrautstudie/Braunschweig/Microbiome_DATA_Kun_Huang/Taxonomy/metaphlan4_taxonomy/"
+files_data        <- list.files(path_files)
+files_kraut_index <- sapply(paste0("SK_",508:525), function(x) { grep(x, files_data) })
+files_kraut       <- files_data[files_kraut_index]
+
+# read the relevant information from every file
+datKrautReads_list <- lapply(files_kraut, function(file_kraut) {
+  
+  dat_reads  <- read.table(paste0(path_files, file_kraut), header = FALSE,
+                           col.names = c("clade_name","clade_taxid","rel_abundance","coverage","estNumberOfReads_clade"))
+  
+  class_list   <- dat_reads$clade_name %>% strsplit("\\|")
+  rows_species <- which((sapply(class_list, length) == 7) | dat_reads$clade_name == "unclassified")
+  dat_reads    <- dat_reads %>% dplyr::slice(rows_species)
+  class_list   <- class_list[rows_species]
+
+  dat_reads <- dat_reads %>% 
+    select(estNumberOfReads_clade) %>% 
+    mutate(estNumberOfReads_clade = as.numeric(estNumberOfReads_clade)) %>% 
+    mutate(species_genus   = sapply(class_list, function(x) { x[6] }),
+           species         = sapply(class_list, function(x) { x[7] })) %>% 
+    mutate(species_genus   = case_when(is.na(species_genus) ~ "unclassified",
+                                       TRUE                 ~ species_genus),
+           species         = case_when(is.na(species)       ~ "unclassified",
+                                       TRUE                 ~ species)) %>% 
+    mutate(across(starts_with("species"), function(x) { gsub(".__", "", x) })) %>% 
+    mutate(across(starts_with("species"), factor)) %>% 
+    mutate(sample = strsplit(file_kraut, "\\_")[[1]][6]) %>% 
+    select(sample, starts_with("species"), everything())
+  
+  return(dat_reads)
+})
+
+# merge all prepared files into one dataset
+dat_krautReads <- datKrautReads_list %>% 
+  bind_rows() %>%
+  as_tibble() %>% 
+  dplyr::left_join(dat_lookup, by = c("sample" = "sample_id")) %>% 
+  select(starts_with("sample"), everything()) %>% 
+  arrange(sample_glass, sample_description) %>% 
+  mutate(sample_description = factor(sample_description, levels = unique(as.character(sample_description))))
+```
+
+
+## Genus distribution per sample
+
+#### Plot of relative abundances
+
+```{r}
+#| fig.width: 10
+
+ggplot(dat, aes(x = sample_description, weight = value, fill = species_genus)) +
+  geom_bar() +
+  facet_grid(~ sample_glass, scales = "free") +
+  ggtitle("Genus distribution per sample") +
+  ylab("relative abundance") +
+  theme(axis.text.x     = element_text(angle = 45, hjust = 1),
+        axis.title.x    = element_blank(),
+        legend.title    = element_blank(),
+        legend.position = "bottom")
+```
+
+#### Table of relative abundances
+
+```{r}
+#| message: false
+
+# header row for the following table
+vector_tableHeaders        <- c(1, rep(3, times = length(unique(dat_lookup$sample_glass))))
+names(vector_tableHeaders) <- c(" ", unique(dat_lookup$sample_glass) %>% as.character() %>% sort())
+
+# plot data in tabular form
+dat %>% 
+  select(species_genus, sample_description, value) %>% 
+  group_by(sample_description, species_genus) %>% 
+  summarize(value = case_when(sum(value) == 0  ~ "",
+                              sum(value) < 0.1 ~ "<0.1%",
+                              TRUE             ~ sum(value) %>% round(1) %>% as.character() %>% paste0("%"))) %>% 
+  ungroup() %>% 
+  pivot_wider(id_cols     = species_genus,
+              names_from  = sample_description,
+              values_from = value) %>% 
+  kable() %>% 
+  add_header_above(vector_tableHeaders)
+```
+
+#### Table of the estimated number of reads per clade
+
+```{r}
+#| message: false
+
+dat_krautReads %>% 
+  select(species_genus, sample_description, estNumberOfReads_clade) %>% 
+  group_by(sample_description, species_genus) %>% 
+  summarize(estNumberOfReads_clade = sum(estNumberOfReads_clade, na.rm = TRUE)) %>% 
+  ungroup() %>% 
+  pivot_wider(id_cols     = species_genus,
+              names_from  = sample_description,
+              values_from = estNumberOfReads_clade) %>% 
+  arrange(as.character(species_genus)) %>% 
+  kable(format.args = list(big.mark = ",")) %>% 
+  add_header_above(vector_tableHeaders)
+```
+
+
+## Species distribution per sample
+
+#### Plot of relative abundances
+
+... with species marked as "Others" that have less than 1% rel. abundance in every sample
+
+```{r}
+#| message: false
+#| fig.width: 10
+
+# helper table
+tab_sort <- dat %>% 
+  group_by(species) %>% 
+  summarize(sum_relAbd = sum(value, na.rm = TRUE),
+            max_relAbd = max(value, na.rm = TRUE)) %>% 
+  arrange(desc(sum_relAbd)) %>% 
+  filter(max_relAbd >= 1)
+
+# color vector
+col_vector <- c(RColorBrewer::brewer.pal(n = 7, name = "Dark2"),
+                RColorBrewer::brewer.pal(n = 12, name = "Set3"),
+                "gray10")
+
+dat %>% 
+  mutate(species_cat = case_when(species %in% tab_sort$species ~ species,
+                                 TRUE                          ~ "Others")) %>% 
+  group_by(sample_glass, sample_description, species_cat) %>% 
+  summarize(value = sum(value, na.rm = TRUE)) %>% 
+  mutate(species_cat = factor(species_cat, levels = c(as.character(tab_sort$species), "Others"))) %>% 
+  ggplot(aes(x = sample_description, weight = value, fill = species_cat)) +
+  geom_bar() +
+  facet_grid(~ sample_glass, scales = "free") +
+  scale_fill_manual(values = col_vector) +
+  ylab("relative abundance") +
+  ggtitle("Species distribution per sample") +
+  theme(axis.text.x     = element_text(angle = 45, hjust = 1),
+        axis.title.x    = element_blank(),
+        legend.title    = element_blank(),
+        legend.position = "bottom")
+```
+
+##### Figure for publication
+
+```{r}
+#| message: false
+#| fig-width: 11
+#| fig-height: 5
+
+dat %>% 
+  filter(!grepl("past", sample_glass)) %>% 
+  mutate(species_cat = case_when(species %in% tab_sort$species ~ species,
+                                 TRUE                          ~ "Others"),
+         sample_description = case_when(sample_description %in% c("1.1 frisch", "2.1a", "3.1a") ~ "sample 1",
+                                        sample_description %in% c("1.2 frisch", "2.2a", "3.2a") ~ "sample 2",
+                                        sample_description %in% c("1.3 frisch", "2.3a", "3.3a") ~ "sample 3")) %>% 
+  group_by(sample_glass, sample_description, species_cat) %>% 
+  summarize(value = sum(value, na.rm = TRUE)) %>% 
+  mutate(species_cat = gsub(species_cat, pattern = "_", replacement = " "),
+         species_cat = factor(species_cat, levels = c(as.character(tab_sort$species) %>% gsub(pattern = "_", replacement = " "), "Others"))) %>% 
+  ggplot(aes(x = sample_description, weight = value, fill = species_cat)) +
+  geom_bar() +
+  facet_grid(~ sample_glass, scales = "free") +
+  scale_fill_manual(values = col_vector) +
+  scale_y_continuous("relative abundance", labels = function(x) { paste0(x, "%") }) +
+  ggtitle("Species distribution in fresh sauerkraut samples") +
+  theme(axis.title.x    = element_blank(),
+        legend.title    = element_blank(),
+        legend.position = "bottom",
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor   = element_blank())
+# ggsave("FigureS1_sauerkrautGlassTaxonomy.png", width = 11, height = 5)
+```
+
+
+#### Table of relative abundances
+
+```{r}
+# plot data in tabular form
+dat %>% 
+  select(species, sample_description, value) %>% 
+  mutate(value = case_when(value == 0  ~ "",
+                           value < 0.1 ~ "<0.1%",
+                           TRUE        ~ value %>% round(1) %>% as.character() %>% paste0("%"))) %>% 
+  pivot_wider(id_cols     = species,
+              names_from  = sample_description,
+              values_from = value) %>% 
+  kable() %>% 
+  add_header_above(vector_tableHeaders)
+```
+
+#### Table of the estimated number of reads per clade
+
+```{r}
+dat_krautReads %>% 
+  select(species, sample_description, estNumberOfReads_clade) %>% 
+  pivot_wider(id_cols     = species,
+              names_from  = sample_description,
+              values_from = estNumberOfReads_clade) %>% 
+  arrange(as.character(species)) %>% 
+  kable(format.args = list(big.mark = ",")) %>% 
+  add_header_above(vector_tableHeaders)
+```
+
+
+## Bacteria strain distribution per sample
+
+#### Plot of relative abundances
+
+```{r}
+#| fig.width: 10
+
+ggplot(dat_strain, aes(x = sample_description, weight = value, fill = strain)) +
+  geom_bar() +
+  facet_grid(~ sample_glass, scales = "free") +
+  ylab("relative abundance") +
+  ggtitle("Bacteria strain distribution per sample") +
+  theme(axis.text.x     = element_text(angle = 45, hjust = 1),
+        axis.title.x    = element_blank(),
+        legend.title    = element_blank(),
+        legend.position = "bottom")
+```
+
+#### Table of relative abundances
+
+```{r}
+# plot data in tabular form
+vector_tableHeaders_strain    <- vector_tableHeaders
+vector_tableHeaders_strain[1] <- 2
+
+dat_strain %>% 
+  select(strain_species, strain, sample_description, value) %>% 
+  mutate(value = case_when(value == 0  ~ "",
+                           value < 0.1 ~ "<0.1%",
+                           TRUE        ~ value %>% round(1) %>% as.character() %>% paste0("%"))) %>% 
+  pivot_wider(id_cols     = c(strain_species, strain),
+              names_from  = sample_description,
+              values_from = value) %>% 
+  kable() %>% 
+  add_header_above(vector_tableHeaders_strain)
+```
+
+#### Table of the estimated number of reads per clade
+
+The estimated number of reads per clade is only given on species level in the taxonomy data,
+not on bacteria strain level.
+Accordingly, please check the above tables in this document to check these statistics
+on species level.

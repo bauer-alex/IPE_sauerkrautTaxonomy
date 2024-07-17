@@ -1,0 +1,151 @@
+---
+title: "Sauerkraut study - Baseline description of interaction subgroups"
+format:
+  html:
+    toc: true
+    code-fold: true
+    embed-resources: true
+---
+
+```{r packages}
+#| warning: false
+
+library(sauerkrautTaxonomyBuddy)
+library(SummarizedExperiment) # microbiome analysis
+library(mia)                  # microbiome analysis
+
+library(readxl)     # read Excel files
+
+library(dplyr)      # data handling
+library(tidyr)      # data transformation
+library(ggplot2)    # data visualization
+library(patchwork)  # grid of ggplot2
+library(kableExtra) # print tables
+
+# set ggplot2 theme
+theme_set(
+  theme_minimal() +
+    theme(plot.title       = element_text(hjust = 0.5),
+          plot.subtitle    = element_text(hjust = 0.5),
+          panel.grid.minor = element_blank(),
+          plot.background  = element_rect(fill = "white", color = "white"))
+)
+
+# suppress scientific notation (= e notation of decimal numbers)
+options(scipen = 999)
+```
+
+
+# Data preparation
+
+```{r set file paths}
+define_dataPaths()
+```
+
+```{r read data}
+#| warning: false
+
+tse <- readAndPrepare_mainTaxonomicData(path_groupInfoRdata               = path_groupInfoRdata,
+                                        path_participantRdata             = path_participantRdata,
+                                        path_samplesIDxlsx                = path_samplesIDxlsx,
+                                        path_dietInfoCsv                  = path_dietInfoCsv,
+                                        path_nutrientInfoCsv              = path_nutrientInfoCsv,
+                                        path_bloodMetabolomeXlsx          = path_bloodMetabolomeXlsx,
+                                        path_stoolMetabolomeXlsx          = path_stoolMetabolomeXlsx,
+                                        path_T4questXlsx                  = path_T4questXlsx,
+                                        path_stoolInfoXlsx                = path_stoolInfoXlsx,
+                                        path_bodyMeasuresXlsx             = path_bodyMeasuresXlsx,
+                                        path_absTaxonomyData              = path_absTaxonomyData,
+                                        path_relTaxonomyData              = path_relTaxonomyData,
+                                        path_sampleLookupXlsx             = path_sampleLookupXlsx,
+                                        path_krautLookupXlsx              = path_krautLookupXlsx,
+                                        path_bloodMarkerBostonRdata       = path_bloodMarkerBostonRdata,
+                                        path_bloodMarkerZentrallaborRdata = path_bloodMarkerZentrallaborRdata,
+                                        path_bloodMarkerBostonXlsx        = path_bloodMarkerBostonXlsx,
+                                        path_bloodMarkerZentrallaborXlsx  = path_bloodMarkerZentrallaborXlsx,
+                                        aggregation_level                 = "species",
+                                        exclude_rareStoolBacteria         = TRUE,
+                                        exclude_sickParticipants          = "taxonomy paper")
+
+# create a joint table with all relevant information
+dat <- tse %>% colData() %>% as.data.frame()
+```
+
+```{r}
+# prepare data
+dat <- dat %>% 
+  mutate(age_cat = case_when(age < 50 ~ paste0(min(age), "-49"),
+                             TRUE     ~ paste0("50-", max(age))),
+         age_cat = factor(age_cat),
+         bmi_cat = case_when(bmi_t0 < 25 ~ paste0("[", floor(min(bmi_t0)), ", 25)"),
+                             TRUE        ~ paste0("[25, ", ceiling(max(bmi_t0)), "]")),
+         bmi_cat = factor(bmi_cat))
+```
+
+Limit data to baseline measurements
+
+```{r}
+dat <- dat %>% 
+  filter(timepoint == "T1")
+```
+
+
+
+# Description
+
+##### Table showing median values for metric variables
+
+```{r}
+# helper function to describe a subgroup
+create_subgroupDescription <- function(dat_subgroup) {
+  
+  data.frame(n                        = nrow(dat_subgroup),
+             age                      = median(dat_subgroup$age) %>% round(),
+             gender_male              = paste0(round(100 * prop.table(table(dat_subgroup$gender))["M"]), "%"),
+             BMI                      = median(dat_subgroup$bmi_t0)                   %>% round(1),
+             hipWaistRatio            = median(dat_subgroup$hipWaistRatio_t0, na.rm = TRUE) %>% round(2),
+             blood_aceticAcid         = median(dat_subgroup$blood_aceticAcid)               %>% round(1),
+             blood_propionicAcid      = median(dat_subgroup$blood_propionicAcid)            %>% round(1),
+             blood_butyricAcid        = median(dat_subgroup$blood_butyricAcid)              %>% round(1),
+             blood_valericAcid        = median(dat_subgroup$blood_valericAcid)              %>% round(1),
+             blood_hexanoicAcid       = median(dat_subgroup$blood_hexanoicAcid)             %>% round(1),
+             blood_isobutyricAcid     = median(dat_subgroup$blood_isobutyricAcid)           %>% round(1),
+             blood_isovalericAcid     = median(dat_subgroup$blood_isovalericAcid)           %>% round(1),
+             blood_methylbutyricAcid  = median(dat_subgroup$blood_methylbutyricAcid)        %>% round(1),
+             richness_hill            = median(dat_subgroup$richness_hill)            %>% round(1),
+             richness_observed        = median(dat_subgroup$richness_observed)        %>% round(),
+             evenness_pielou          = median(dat_subgroup$evenness_pielou)          %>% round(2),
+             evenness_simpson         = median(dat_subgroup$evenness_simpson)         %>% round(2),
+             diversity_shannon        = median(dat_subgroup$diversity_shannon)        %>% round(2),
+             diversity_invSimpson     = median(dat_subgroup$diversity_invSimpson)     %>% round(1),
+             dominance_dbp            = median(dat_subgroup$dominance_dbp)            %>% round(2),
+             dominance_coreAbundance  = median(dat_subgroup$dominance_coreAbundance)  %>% round(2),
+             rarity_logModuloSkewness = median(dat_subgroup$rarity_logModuloSkewness) %>% round(2),
+             divergence_toMedian      = median(dat_subgroup$divergence_toMedian)      %>% round(2))
+}
+```
+
+```{r}
+#| column: page
+
+dat_subgroup_list <- list("age < 50"      = dat %>% filter(age < 50),
+                          "age >= 50"     = dat %>% filter(age >= 50),
+                          "gender male"   = dat %>% filter(gender == "M"),
+                          "gender female" = dat %>% filter(gender == "W"),
+                          "BMI < 25"      = dat %>% filter(bmi_t0 < 25),
+                          "BMI >= 25"     = dat %>% filter(bmi_t0 >= 25))
+
+dat_results_list <- lapply(dat_subgroup_list, create_subgroupDescription)
+dat_results      <- dat_results_list %>% dplyr::bind_rows() %>% 
+  mutate(subgroup = names(dat_subgroup_list)) %>% 
+  select(subgroup, everything()) %>% 
+  t()
+colnames(dat_results) <- dat_results[1,]
+dat_results           <- dat_results[-1,]
+
+dat_results %>% 
+  kable() %>% 
+  kable_styling()
+
+# write.csv(dat_results, file = "11_strata_baselineDescriptionTable.csv", row.names = TRUE)
+```

@@ -1,0 +1,60 @@
+---
+title: "Sauerkraut study - Descriptive Opinion Questionnaire"
+format:
+  html:
+    toc: true
+    code-fold: true
+    embed-resources: true
+---
+
+```{r packages}
+#| warning: false
+
+library(readxl)     # read Excel data
+library(dplyr)      # data handling
+library(knitr)      # print tables
+library(kableExtra) # print tables more nicely
+```
+
+```{r}
+dat <- read_excel("../data/1f - opinion questionnaire.xlsx", skip = 1)
+```
+
+# Fresh sauerkraut contentment / toleration
+
+... measured on a scale from 1 (very bad) to 10 (very good).
+
+```{r}
+# table(dat$SA5a, useNA = "always") %>% prop.table() %>% round(2)
+
+x_fresh <- dat$SA5a[!is.na(dat$SA5a) & dat$SA5a != 999]
+
+tab_abs <- table(x_fresh)
+tab_rel <- table(x_fresh) %>% prop.table() %>% round(2)
+
+data.frame(value    = names(tab_abs),
+           freq_abs = as.vector(tab_abs),
+           freq_rel = paste0(100 * unname(tab_rel), "%")) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+# Pasteurized sauerkraut contentment / toleration
+
+... measured on a scale from 1 (very bad) to 10 (very good).
+
+```{r}
+# table(dat$SA5b, useNA = "always")
+
+x_past <- dat$SA5b[!is.na(dat$SA5b) & dat$SA5b != 999]
+
+tab_abs <- table(x_past)
+tab_rel <- table(x_past) %>% prop.table() %>% round(2)
+
+data.frame(value    = names(tab_abs),
+           freq_abs = as.vector(tab_abs),
+           freq_rel = paste0(100 * unname(tab_rel), "%")) %>% 
+  kable() %>% 
+  kable_styling()
+```
+

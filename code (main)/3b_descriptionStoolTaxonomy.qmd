@@ -1,0 +1,317 @@
+---
+title: "Description Stool Sample Taxonomy"
+format:
+  html:
+    toc: true
+    code-fold: true
+    self-contained: true
+---
+
+## Data preparation
+
+```{r packages}
+#| warning: false
+
+library(sauerkrautTaxonomyBuddy)
+
+library(dplyr)     # data handling
+library(tidyr)     # data transformation
+library(ggplot2)   # data visualization
+library(ggrepel)   # add text labels to plots
+library(patchwork) # grid of ggplots
+library(knitr)     # table printing
+library(mia)       # microbiome analyses
+library(miaViz)    # microbiome visualizations
+library(scater)    # microbiome visualizations
+
+theme_set(theme_minimal()) # set ggplot2 theme
+```
+
+```{r set file paths}
+define_dataPaths()
+```
+
+
+```{r read data}
+#| warning: false
+
+# dataset excluding rare stool bacteria
+tse <- readAndPrepare_mainTaxonomicData(path_groupInfoRdata               = path_groupInfoRdata,
+                                        path_participantRdata             = path_participantRdata,
+                                        path_samplesIDxlsx                = path_samplesIDxlsx,
+                                        path_dietInfoCsv                  = path_dietInfoCsv,
+                                        path_nutrientInfoCsv              = path_nutrientInfoCsv,
+                                        path_bloodMetabolomeXlsx          = path_bloodMetabolomeXlsx,
+                                        path_stoolMetabolomeXlsx          = path_stoolMetabolomeXlsx,
+                                        path_T4questXlsx                  = path_T4questXlsx,
+                                        path_stoolInfoXlsx                = path_stoolInfoXlsx,
+                                        path_bodyMeasuresXlsx             = path_bodyMeasuresXlsx,
+                                        path_absTaxonomyData              = path_absTaxonomyData,
+                                        path_relTaxonomyData              = path_relTaxonomyData,
+                                        path_sampleLookupXlsx             = path_sampleLookupXlsx,
+                                        path_krautLookupXlsx              = path_krautLookupXlsx,
+                                        path_bloodMarkerBostonRdata       = path_bloodMarkerBostonRdata,
+                                        path_bloodMarkerZentrallaborRdata = path_bloodMarkerZentrallaborRdata,
+                                        path_bloodMarkerBostonXlsx        = path_bloodMarkerBostonXlsx,
+                                        path_bloodMarkerZentrallaborXlsx  = path_bloodMarkerZentrallaborXlsx,
+                                        aggregation_level                 = "species",
+                                        exclude_rareStoolBacteria         = TRUE,
+                                        exclude_sickParticipants          = "taxonomy paper")
+dat <- tse %>% colData() %>% as.data.frame()
+```
+
+
+## Description
+
+### Relative abundances
+
+##### Relative abundances of the 50 most abundant species
+
+```{r}
+#| warning: false
+
+miaViz::plotAbundanceDensity(tse, layout = "jitter", assay.type = "relAbd",
+                             n = 50, point_size = 1, point_shape = 19, point_alpha = .1) + 
+  scale_x_log10(label = function(x) { scales::percent(round(x / 100, 3)) })
+```
+
+##### Relative abundances of the 5 most abundant species plotted by another variable
+
+```{r}
+#| warning: false
+
+miaViz::plotAbundanceDensity(tse, layout = "density", assay.type = "relAbd",
+                             n = 5, colour_by = "inter_treat", point_alpha = .1) +
+  scale_x_log10(label = function(x) { scales::percent(round(x / 100, 3)) })
+```
+
+##### Relative abundances on phylum level
+
+```{r}
+#| message: false
+
+# create a joint table with all relevant information
+dat_all <- mia::meltAssay(tse, assay.type = "relAbd",
+                          add_row_data = TRUE, add_col_data = TRUE)
+
+# aggregate on phylum level (and reduce the data to the 5 most abundant phyla)
+relFreq_phylum  <- dat_all %>% group_by(phylum) %>% summarize(relAbd_sum = sum(relAbd)) %>% arrange(desc(relAbd_sum))
+dat_phylum <- dat_all %>% 
+  mutate(phylum = case_when(phylum %in% head(relFreq_phylum$phylum, 5) ~ phylum,
+                            TRUE                                       ~ "Other")) %>% 
+  group_by(SampleID, phylum, inter_treat) %>% 
+  summarize(relAbd = sum(relAbd)) %>% 
+  ungroup()
+
+# sort phylum levels by frequency
+relFreq_phylum  <- dat_phylum %>% group_by(phylum) %>% summarize(relAbd_sum = sum(relAbd)) %>% arrange(relAbd_sum)
+dat_phylum <- dat_phylum %>% mutate(phylum = factor(phylum, levels = relFreq_phylum$phylum))
+
+# sort samples by 'Firmicutes' frequency
+relFreq_firmicutes <- dat_phylum %>% filter(phylum == "Firmicutes") %>% arrange(desc(relAbd))
+dat_phylum    <- dat_phylum %>% mutate(SampleID = factor(SampleID, levels = relFreq_firmicutes$SampleID))
+
+# plot
+dat_phylum %>% 
+  group_by(inter_treat, phylum) %>% 
+  summarize(relAbd_mean = mean(relAbd)) %>% 
+  ungroup() %>% 
+  ggplot(aes(x = inter_treat, weight = relAbd_mean, fill = phylum)) +
+  geom_bar() +
+  ggtitle("Average relative phylum abundances over all participants") +
+  theme(axis.title = element_blank())
+```
+
+```{r}
+#| message: false
+
+# aggregate on phylum level (and reduce the data to the 5 most abundant phyla)
+relFreq_phylum  <- dat_all %>% group_by(phylum) %>% summarize(relAbd_sum = sum(relAbd)) %>% arrange(desc(relAbd_sum))
+set.seed(2023)
+dat_phylum <- dat_all %>% 
+  filter(participant_id %in% sample(participant_id, size = 20)) %>%
+  mutate(phylum = case_when(phylum %in% head(relFreq_phylum$phylum, 5) ~ phylum,
+                            TRUE                                       ~ "Other")) %>% 
+  group_by(SampleID, phylum, inter_treat) %>% 
+  summarize(relAbd = sum(relAbd)) %>% 
+  ungroup()
+
+# sort phylum levels by frequency
+relFreq_phylum  <- dat_phylum %>% group_by(phylum) %>% summarize(relAbd_sum = sum(relAbd)) %>% arrange(relAbd_sum)
+dat_phylum <- dat_phylum %>% mutate(phylum = factor(phylum, levels = relFreq_phylum$phylum))
+
+# sort samples by 'Firmicutes' frequency
+relFreq_firmicutes <- dat_phylum %>% filter(phylum == "Firmicutes") %>% arrange(desc(relAbd))
+dat_phylum    <- dat_phylum %>% mutate(SampleID = factor(SampleID, levels = relFreq_firmicutes$SampleID))
+
+# plot by sample
+ggplot(dat_phylum, aes(x = SampleID, weight = relAbd, fill = phylum)) +
+  geom_bar() +
+  geom_hline(yintercept = seq(20, 80, by = 20), col = "gray20", linetype = 2) +
+  facet_grid(~ inter_treat, scales = "free") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  ggtitle("Relative phylum abundances of 20 randomly selected participants")
+```
+
+##### Plot function by miaViz package
+
+```{r}
+#| warning: false
+
+# Getting top taxa on a Phylum level
+tse_phylum <- mergeFeaturesByRank(tse, rank = "phylum", onRankOnly = TRUE)
+top_taxa   <- getTopFeatures(tse_phylum,top = 5, assay.type = "relAbd")
+
+# Renaming the "Phylum" rank to keep only top taxa and the rest to "Other"
+phylum_renamed <- lapply(rowData(tse)$phylum,
+                         function(x){if (x %in% top_taxa) { as.character(x) } else { "Other" }})
+rowData(tse)$phylum <- as.character(phylum_renamed)
+
+# Visualizing the composition barplot, with samples order by "Bacteroidetes"
+plotAbundance(tse, assay.type = "relAbd", rank = "phylum",
+              order_rank_by = "abund", order_sample_by = "inter_treat", features = "inter_treat")
+```
+
+
+### Prevalence x Abundance
+
+```{r}
+#| warning: false
+
+rowData(tse)$prevalence     <- tse %>% getPrevalence(assay.type = "relAbd", detection = 0, sort = FALSE, abund_values = "relabundance", as_relative = TRUE)
+rowData(tse)$abundance_sum  <- tse %>% assay("relAbd") %>% rowSums()
+rowData(tse)$abundance_mean <- tse %>% assay("relAbd") %>% rowMeans()
+rowData(tse)$abundance_max  <- apply(tse %>% assay("relAbd"), 1, max)
+
+tse %>% rowData() %>% as.data.frame() %>% 
+  mutate(species = row.names(.)) %>% 
+  ggplot(aes(x = abundance_sum, y = prevalence)) +
+  geom_point(alpha = 0.5) +
+  geom_rug(alpha = 0.1) +
+  scale_x_continuous(labels = scales::label_number(), name = "Total Abundance") +
+  scale_y_continuous(
+    labels   = scales::label_percent(),
+    breaks   = scales::breaks_pretty(n = 9),
+    name     = "Prevalence (%)",
+    sec.axis = sec_axis(
+      trans  = ~ . * ncol(tse),
+      breaks = scales::breaks_pretty(n = 9),
+      name   = "Prevalence (N samples)"
+    )) +
+  ggrepel::geom_text_repel(
+    data               = function(df) filter(df, abundance_sum > 300 | prevalence > 0.6),
+    mapping            = aes(label = species),
+    size               = 2.5,
+    min.segment.length = 0) +
+  theme_bw()
+```
+
+Same plot on log10 scale
+
+```{r}
+#| warning: false
+
+## Prevalence x abundance on the complete species data - axis log transformed
+tse %>% rowData() %>% as.data.frame() %>% 
+  mutate(species = row.names(.)) %>% 
+  ggplot(aes(x = abundance_sum, y = prevalence)) +
+  geom_point(alpha = 0.5) +
+  geom_rug(alpha = 0.1) +
+  scale_x_continuous(trans = scales::pseudo_log_trans(base = 10), labels = scales::label_number(), name = "Total Abundance") +
+  scale_y_continuous(trans = scales::pseudo_log_trans(base = 10),
+                     labels   = scales::label_percent(),
+                     breaks   = scales::breaks_pretty(n = 9),
+                     name     = "Prevalence (%)",
+                     sec.axis = sec_axis(
+                       trans  = ~ . * ncol(tse),
+                       breaks = scales::breaks_pretty(n = 9),
+                       name   = "Prevalence (N samples)"
+                     )) + 
+  ggrepel::geom_text_repel(
+    mapping            = aes(label = species),
+    size               = 2.5,
+    min.segment.length = 0) +
+  theme_bw() 
+```
+
+
+### Microbial diversity measurements
+
+```{r}
+# helper function for boxplots
+plot_boxplot <- function(y_var, title) {
+  results_list <- tse %>% colData() %>% as.data.frame() %>% 
+    filter(timepoint != "T5") %>% 
+    plot_crossoverBoxplots(y_var            = y_var,
+                           intervention_var = "intervention",
+                           t_var            = "treatment",
+                           subject_var      = "participant_id",
+                           title            = title)
+  
+  # create plot
+  results_list$ggplot_object %>% print()
+  # print table
+  results_list$results_table %>% knitr::kable()
+}
+```
+
+
+```{r}
+# richness
+plot_boxplot("richness_observed", "Richness index - Observed")
+plot_boxplot("richness_hill",     "Richness index - Hill")
+
+# evenness
+plot_boxplot("evenness_pielou",   "Evenness index - Pielou")
+plot_boxplot("evenness_simpson",  "Evenness index - Simpson")
+
+# diversity
+plot_boxplot("diversity_shannon",    "Diversity index - Shannon")
+plot_boxplot("diversity_invSimpson", "Diversity index - Inversed Simpson")
+
+# dominance
+plot_boxplot("dominance_dbp",           "Dominance index - dbp")
+plot_boxplot("dominance_coreAbundance", "Dominance index - Core abundance")
+
+# rarity
+plot_boxplot("rarity_logModuloSkewness", "Rarity index - log modulo skewness")
+
+# divergence
+plot_boxplot("divergence_toMedian", "Divergence index - divergence to median")
+```
+
+##### Alternative violin plot
+
+```{r}
+scater::plotColData(tse, x = "inter_treat", y = "richness_observed", colour_by = "inter_treat")
+```
+
+
+### Baseline alpha diversity tests
+
+##### ... between BMI groups
+
+Research question: Is the baseline diversity different between participants with
+high BMI (at least 25) and participants with normal BMI (less than 25)?
+
+```{r}
+dat_bmi <- dat %>% 
+  filter(timepoint == "T1") %>% 
+  mutate(bmi_cat = case_when(is.na(bmi_t0) ~ NA_character_,
+                             bmi_t0 < 25   ~ "BMI < 25",
+                             TRUE          ~ "BMI >= 25"),
+         bmi_cat = factor(bmi_cat)) %>% 
+  select(bmi_cat, starts_with("diversity_"))
+
+# plot
+gg_shannon    <- ggplot(dat_bmi, aes(x = bmi_cat, y = diversity_shannon))    + geom_boxplot() + ggtitle("Shannon diversity")
+gg_invSimpson <- ggplot(dat_bmi, aes(x = bmi_cat, y = diversity_invSimpson)) + geom_boxplot() + ggtitle("inv. Simpson diversity")
+gg_shannon + gg_invSimpson
+
+# tests
+tt_shannon    <- t.test(dat_bmi$diversity_shannon    ~ dat_bmi$bmi_cat)
+tt_invSimpson <- t.test(dat_bmi$diversity_invSimpson ~ dat_bmi$bmi_cat)
+```
+
+t-test p-value comparing Shannon diversity: `r tt_shannon$p.value %>% round(4)`  
+t-test p-value comparing inv. Simpson diversity: `r tt_invSimpson$p.value %>% round(4)`

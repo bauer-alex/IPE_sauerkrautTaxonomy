@@ -1,0 +1,448 @@
+---
+title: "Dimension Reduction for Taxonomy Data -- Main Results"
+format:
+  html:
+    toc: true
+    code-fold: true
+    embed-resources: true
+---
+
+This document contains the results of the application of the UMAP dimension reduction
+(also called "ordination") method to the microbiome data.
+An overview of all evaluated alternative methods (which lead to similar results
+as UMAP, though) can be found in a separate document.
+
+How to read it:
+
+- UMAP performs a **(dis)similarity analysis on relative abundances**.
+In the estimation process, every sample is compared to every other sample in the
+data based on the similarity of their bacteria species profile. **The more
+similar two samples are, the closer their points are plotted in the different graphs.**
+- Note: For UMAP as a nonlinear method there is no nontrivial measure to
+estimate how much information is lost by focusing on two dimensions only.
+For the PCoA methods the first two dimensions only explain 15% of the overall
+variation in the data, i.e. **85% of the information is lost when focusing only
+on these two dimensions**. Accordingly, **results should be interpreted with
+care**.
+- As of this, minor differences in the plotted ellipses should not be overinterpreted,
+but instead **interpretation should focus on more global patterns** like neighboring
+families / genuses or the visualized age and richness patterns plotted for the
+UMAP results.
+
+
+## Data preparation and UMAP estimation
+
+```{r packages}
+#| warning: false
+
+library(sauerkrautTaxonomyBuddy)
+library(SummarizedExperiment) # microbiome analysis
+library(mia)                  # microbiome analysis
+library(vegan)                # (dis)similarity measures
+
+library(scater)     # dimension reduction and visualizations
+
+library(dplyr)      # data handling
+library(tidyr)      # data transformation
+library(ggplot2)    # data visualization
+library(ggpubr)     # joint ggplots
+library(patchwork)  # joint ggplots
+library(kableExtra) # table printing
+
+# set ggplot2 theme
+theme_set(
+  theme_minimal() +
+    theme(plot.title       = element_text(hjust = 0.5),
+          plot.subtitle    = element_text(hjust = 0.5),
+          panel.grid.minor = element_blank(),
+          plot.background  = element_rect(fill = "white", color = "white"))
+)
+```
+
+```{r set file paths}
+define_dataPaths()
+```
+
+```{r data preparation}
+#| warning: false
+
+tse <- readAndPrepare_mainTaxonomicData(path_groupInfoRdata               = path_groupInfoRdata,
+                                        path_participantRdata             = path_participantRdata,
+                                        path_samplesIDxlsx                = path_samplesIDxlsx,
+                                        path_dietInfoCsv                  = path_dietInfoCsv,
+                                        path_nutrientInfoCsv              = path_nutrientInfoCsv,
+                                        path_bloodMetabolomeXlsx          = path_bloodMetabolomeXlsx,
+                                        path_stoolMetabolomeXlsx          = path_stoolMetabolomeXlsx,
+                                        path_T4questXlsx                  = path_T4questXlsx,
+                                        path_stoolInfoXlsx                = path_stoolInfoXlsx,
+                                        path_bodyMeasuresXlsx             = path_bodyMeasuresXlsx,
+                                        path_absTaxonomyData              = path_absTaxonomyData,
+                                        path_relTaxonomyData              = path_relTaxonomyData,
+                                        path_sampleLookupXlsx             = path_sampleLookupXlsx,
+                                        path_krautLookupXlsx              = path_krautLookupXlsx,
+                                        path_bloodMarkerBostonRdata       = path_bloodMarkerBostonRdata,
+                                        path_bloodMarkerZentrallaborRdata = path_bloodMarkerZentrallaborRdata,
+                                        path_bloodMarkerBostonXlsx        = path_bloodMarkerBostonXlsx,
+                                        path_bloodMarkerZentrallaborXlsx  = path_bloodMarkerZentrallaborXlsx,
+                                        aggregation_level                 = "species",
+                                        exclude_sickParticipants          = "taxonomy paper")
+
+dat <- tse %>% 
+  colData() %>% 
+  as.data.frame()
+```
+
+```{r}
+# add logarithmized versions of the SCFA variables to the dataset, for plotting
+dat <- dat %>% 
+  mutate(stool_methylbutyricAcid_log = log(stool_methylbutyricAcid),
+         stool_aceticAcid_log         = log(stool_aceticAcid),
+         stool_butyricAcid_log        = log(stool_butyricAcid),
+         stool_hexanoicAcid_log       = log(stool_hexanoicAcid),
+         stool_isobutyricAcid_log     = log(stool_isobutyricAcid),
+         stool_isovalericAcid_log     = log(stool_isovalericAcid),
+         stool_propionicAcid_log      = log(stool_propionicAcid),
+         stool_valericAcid_log        = log(stool_valericAcid))
+
+colData(tse) <- dat %>% DataFrame()
+```
+
+
+```{r estimate UMAP}
+#| warning: false
+#| message: false
+#| results: hide
+
+set.seed(2025)
+tse <- tse %>% runUMAP(name = "UMAP", exprs_values = "relAbd")
+```
+
+```{r logarithmize some variables, for plotting}
+colData(tse)$logDailyConsumption_fiber <- log(colData(tse)$dailyConsumption_fiber)
+colData(tse)$logDailyConsumption_fat   <- log(colData(tse)$dailyConsumption_fat)
+colData(tse)$logDailyConsumption_water <- log(colData(tse)$dailyConsumption_water)
+```
+
+
+```{r}
+# helper function
+get_plotList <- function(taxRank_dominance, taxRank_topNfocus) {
+  
+  # create vector of all biodiversity measures in the dataset
+  covars_bd <- dat %>% 
+    select(starts_with("richness") | starts_with("evenness") | starts_with("diversity") |
+             starts_with("dominance") | starts_with("rarity") | starts_with("divergence"),
+           stool_type, ph_value, contains("Acid")) %>% 
+    colnames()
+  
+  # get plot list
+  plot_dimReduction(tse                = tse,
+                    dimReduction_name  = "UMAP",
+                    assay              = "relAbd",
+                    taxRank_dominance  = taxRank_dominance,
+                    taxRank_topNfocus  = taxRank_topNfocus,
+                    covars_categorical = c("gender", "flatulence_afterFresh", "flatulence_afterPast",
+                                           "betterDigestion_afterFresh", "betterDigestion_afterPast",
+                                           "stoolType_healthy", "diet_veggie"),
+                    covars_metric      = c("age", "bmi_t0", "dailyConsumption_fiber",
+                                           "dailyConsumption_fat", "dailyConsumption_water",
+                                           "logDailyConsumption_fiber", "logDailyConsumption_fat",
+                                           "logDailyConsumption_water",
+                                           covars_bd))
+}
+```
+
+```{r create plot objects}
+#| warning: false
+
+gg_famList <- get_plotList("family",  taxRank_topNfocus = 8)
+gg_genList <- get_plotList("genus",   taxRank_topNfocus = 10)
+gg_spcList <- get_plotList("species", taxRank_topNfocus = 13)
+```
+
+
+# Rel. abundance of L. paracasei
+
+```{r}
+#| column: page
+#| fig.width: 16
+#| fig.height: 16
+
+gg_famList$gg_Lparacasei_byIntervention / gg_famList$gg_Lparacasei_byIntervention_cat
+
+gg_famList$gg_LparacaseiChange_byIntervention / gg_famList$gg_LparacaseiChange_byIntervention_cat
+```
+
+
+# Most dominant taxa
+
+```{r}
+#| column: page
+#| fig.width: 16
+#| fig.height: 16
+
+(gg_famList$gg_dominantTaxa + gg_genList$gg_dominantTaxa) / (gg_spcList$gg_dominantTaxa + guides(color = guide_legend(ncol = 2))) + plot_layout(guides = "collect")
+```
+
+
+## Figure for publication
+
+```{r}
+#| column: page
+#| fig.width: 16
+#| fig.height: 6
+
+gg_spcList$gg_dominantTaxa +
+  ggtitle("UMAP visualization of stool microbiota",
+          "colored by dominant species") +
+  theme(panel.grid.major = element_line(color = "gray95"))
+# ggsave("UMAP_dominantSpecies.png", width = 18, height = 7)
+```
+
+
+# Strongest growth taxa
+
+```{r}
+#| column: page
+#| fig.width: 16
+#| fig.height: 8
+
+((gg_famList$gg_maxGrowthTaxa_fresh + theme(legend.position = "none")) + gg_famList$gg_maxGrowthTaxa_past) + plot_layout(guides = "collect")
+((gg_genList$gg_maxGrowthTaxa_fresh + theme(legend.position = "none")) + gg_genList$gg_maxGrowthTaxa_past) + plot_layout(guides = "collect")
+((gg_spcList$gg_maxGrowthTaxa_fresh + theme(legend.position = "none")) + gg_spcList$gg_maxGrowthTaxa_past) + plot_layout(guides = "collect")
+```
+
+
+# Strongest loss taxa
+
+```{r}
+#| column: page
+#| fig.width: 16
+#| fig.height: 8
+
+((gg_famList$gg_maxLossTaxa_fresh + theme(legend.position = "none")) + gg_famList$gg_maxLossTaxa_past) + plot_layout(guides = "collect")
+((gg_genList$gg_maxLossTaxa_fresh + theme(legend.position = "none")) + gg_genList$gg_maxLossTaxa_past) + plot_layout(guides = "collect")
+((gg_spcList$gg_maxLossTaxa_fresh + theme(legend.position = "none")) + gg_spcList$gg_maxLossTaxa_past) + plot_layout(guides = "collect")
+```
+
+
+# Experimental settings
+
+```{r}
+#| column: page
+#| fig.width: 16
+#| fig.height: 8
+
+(gg_famList$gg_groups + gg_famList$gg_interventionTimes) + plot_layout(guides = "collect")
+```
+
+
+## Figure for publication
+
+```{r}
+gg_famList$gg_interventionTimes_v2 +
+  ggtitle("UMAP visualization of stool microbiota",
+          "colored by intervention") +
+  theme(panel.grid.major = element_line(color = "gray95"))
+# ggsave("UMAP_interventionEffects.png", width = 8, height = 6)
+```
+
+
+# Variation of each participants' measurements
+
+```{r}
+#| column: page
+#| fig.width: 16
+#| fig.height: 12
+
+# plot all data
+gg_famList$gg_participantVariation
+
+# ... without T5
+gg_famList$gg_participantVariation_withoutT5
+```
+
+
+```{r}
+#| column: page
+#| fig.width: 16
+#| fig.height: 8
+
+# plot by intervention
+gg_famList$gg_participantVariation_byIntervention
+
+# plot by diversity
+gg_famList$gg_participantVariation_byInt_div
+
+# plot by high vs. low change in observed richness
+gg_famList$gg_participantVariation_byRichness
+
+# plot by high vs. low change in Shannon diversity
+gg_famList$gg_participantVariation_byDiversity
+```
+
+
+## Figure for publication
+
+```{r}
+#| fig-width: 6
+#| fig-height: 6
+
+gg_famList$gg_participantVariation_minimal
+# ggsave("FigureS7_UMAP_personalVariation.png", width = 6, height = 6)
+```
+
+
+# Sociodemographics
+
+```{r}
+#| column: page
+#| fig.width: 16
+#| fig.height: 16
+
+gg_famList$covar_gender / (gg_famList$covar_age + gg_famList$covar_bmi_t0) + plot_layout(guides = "collect")
+```
+
+
+# Dietary variables
+
+```{r}
+#| column: page
+#| fig.width: 16
+#| fig.height: 16
+
+(gg_famList$covar_diet_veggie + gg_famList$covar_dailyConsumption_fiber) / (gg_famList$covar_dailyConsumption_fat + gg_famList$covar_dailyConsumption_water) + plot_layout(guides = "collect")
+
+(ggplot() + gg_famList$covar_logDailyConsumption_fiber) / (gg_famList$covar_logDailyConsumption_fat + gg_famList$covar_logDailyConsumption_water) + plot_layout(guides = "collect")
+```
+
+
+# Measures of biodiversity
+
+```{r}
+#| column: page
+#| fig.width: 16
+#| fig.height: 8
+
+# richness
+(gg_famList$covar_richness_hill + gg_famList$covar_richness_observed) + plot_layout(guides = "collect")
+
+# evenness
+(gg_famList$covar_evenness_pielou + gg_famList$covar_evenness_simpson) + plot_layout(guides = "collect")
+
+# alpha diversity
+(gg_famList$covar_diversity_shannon + gg_famList$covar_diversity_invSimpson) + plot_layout(guides = "collect")
+
+# dominance
+(gg_famList$covar_dominance_dbp + gg_famList$covar_dominance_coreAbundance) + plot_layout(guides = "collect")
+
+# rarity and divergence
+(gg_famList$covar_rarity_logModuloSkewness + gg_famList$covar_divergence_toMedian) + plot_layout(guides = "collect")
+```
+
+
+## Figure for publication
+
+```{r}
+#| message: false
+#| column: page
+#| fig-width: 22
+#| fig-height: 13
+
+figS6_baseSize <- 16
+
+# ensure identical plot limits for each of the jointly plotted figures
+ylim <- c(-3.5, 3.2)
+
+gg_domTaxa <- gg_spcList$gg_dominantTaxa +
+  ggtitle("dominant species", "") +
+  theme_minimal(base_size = figS6_baseSize) +
+  theme(plot.title       = element_text(hjust = 0.5),
+        panel.grid.major = element_line(color = "gray95"),
+        panel.grid.minor = element_blank())
+gg_domTaxa_legend <- ggpubr::get_legend(gg_domTaxa)
+gg_domTaxa        <- gg_domTaxa + theme(legend.position = "none")
+
+gg_gender <- gg_famList$covar_sex +
+  ylim(ylim) +
+  ggtitle("sex", NULL) +
+  theme_minimal(base_size = figS6_baseSize) +
+  theme(plot.title      = element_text(hjust = 0.5),
+        legend.position = "bottom",
+        panel.grid.minor = element_blank())
+
+gg_age <- gg_famList$covar_age +
+  ylim(ylim) +
+  ggtitle("age", NULL) +
+  theme_minimal(base_size = figS6_baseSize) +
+  theme(plot.title       = element_text(hjust = 0.5),
+        legend.position  = "bottom",
+        panel.grid.minor = element_blank(),
+        axis.title.y     = element_blank(),
+        axis.text.y      = element_blank())
+
+gg_bmi <- gg_famList$covar_bmi_t0 +
+  ylim(ylim) +
+  ggtitle("baseline BMI", NULL) +
+  scale_color_viridis_c("baseline BMI") +
+  theme_minimal(base_size = figS6_baseSize) +
+  theme(plot.title       = element_text(hjust = 0.5),
+        legend.position  = "bottom",
+        panel.grid.minor = element_blank(),
+        axis.title.y     = element_blank(),
+        axis.text.y      = element_blank())
+
+gg_divShannon <- gg_famList$covar_diversity_shannon +
+  ggtitle("Shannon diversity", NULL) +
+  scale_color_continuous("Shannon diversity", type = "viridis") +
+  ylim(ylim) +
+  theme_minimal(base_size = figS6_baseSize) +
+  theme(plot.title       = element_text(hjust = 0.5),
+        panel.grid.major = element_line(color = "gray95"),
+        panel.grid.minor = element_blank(),
+        legend.position  = "bottom",
+        axis.title.y     = element_blank(),
+        axis.text.y      = element_blank())
+
+
+# joint plot
+layout <- "
+AAABBBBB
+CCDDEEFF
+"
+gg_domTaxa + gg_domTaxa_legend + gg_gender + gg_age + gg_bmi + gg_divShannon +
+  patchwork::plot_layout(design = layout, guides = "keep") +
+  patchwork::plot_annotation(title = "UMAP colored by ...", theme = theme(plot.title = element_text(hjust = 0.5, size = 20)))
+# ggsave("FigureS5_UMAP.png", width = 22, height = 13)
+```
+
+
+
+# Stool and digestion
+
+In the following 'flatulence after fresh / pasteurized intervention' and 'better digestion after fresh / pasteurized intervenion' plots all measurements of a person are plotted and based on the specific variable (e.g. if a person had flatulence after the fresh intervention) **all timepoints** of this person are colored accordingly.
+
+```{r}
+#| warning: false
+#| column: page
+#| fig.width: 16
+#| fig.height: 8
+
+# flatulence after interventions
+gg_famList$covar_flatulence_afterFresh + gg_famList$covar_flatulence_afterPast
+
+# better digestion after intervenions
+gg_famList$covar_betterDigestion_afterFresh + gg_famList$covar_betterDigestion_afterPast
+
+# stool type
+gg_famList$covar_stool_type + gg_famList$covar_stoolType_healthy
+```
+
+
+```{r}
+#| fig.width: 8
+#| fig.height: 8
+
+# PH value
+gg_famList$covar_ph_value
+```

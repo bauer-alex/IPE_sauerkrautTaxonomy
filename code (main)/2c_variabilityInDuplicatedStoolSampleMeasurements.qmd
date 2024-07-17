@@ -1,0 +1,203 @@
+---
+title: "Variability in duplicated stool sample measurements"
+format:
+  html:
+    toc: true
+    code-fold: true
+    self-contained: true
+---
+
+## Data preparation
+
+```{r packages}
+#| warning: false
+
+library(sauerkrautTaxonomyBuddy)
+
+library(dplyr)      # data handling
+library(tidyr)      # data transformation
+library(ggplot2)    # data visualization
+library(knitr)      # table printing
+library(kableExtra) # kable styling
+
+library(mgcv)       # regression models for ICC
+
+theme_set(theme_minimal()) # set ggplot2 theme
+```
+
+```{r set file paths}
+define_dataPaths()
+```
+
+```{r read data}
+#| message: false
+
+datList_tax <- readAndPrepare_taxonomy(path_taxonomyData         = path_relTaxonomyData,
+                                       path_sampleLookupXlsx     = path_sampleLookupXlsx,
+                                       path_krautLookupXlsx      = path_krautLookupXlsx,
+                                       aggregation_level         = "species",
+                                       exclude_rareStoolBacteria = FALSE,
+                                       exclude_sickParticipants  = "taxonomy paper")
+dat_stoolTax     <- datList_tax$dat_stoolSamples
+dat_stoolDuplTax <- datList_tax$dat_stoolDuplicateSamples
+dat_lookupTax    <- datList_tax$dat_lookupStool
+rm(datList_tax)
+```
+
+```{r data prep}
+# limit the main stool dataset to the original observations of the duplicates
+dat_dupl <- dat_lookupTax %>% filter(!is.na(id_duplicateSample))
+dat_stoolOrigTax <- dat_stoolTax %>% 
+  select(starts_with("species"), all_of(paste0("sample_", dat_dupl$sample_id)))
+
+# exclude species without any >0 frequency across all of the remaining samples
+dat_stoolOrigTax <- dat_stoolOrigTax %>%
+  mutate(row_sum    = rowSums(across(starts_with("sample"))),
+         row_isZero = (row_sum == 0)) %>%
+  filter(!row_isZero) %>% 
+  select(-row_sum, -row_isZero)
+```
+
+## Check reliability
+
+Intra-observer reliability
+
+```{r}
+# rename the samples to make duplicates clearer
+dat_duplSamples <- dat_lookupTax %>% 
+  filter(!is.na(id_duplicateSample)) %>% 
+  select(sample_id, id_duplicateSample)
+for (i in 1:nrow(dat_duplSamples)) {
+  orig_column <- match(paste0("sample_", dat_duplSamples$sample_id[i]), colnames(dat_stoolOrigTax))
+  dupl_column <- match(paste0("sample_", dat_duplSamples$id_duplicateSample[i]), colnames(dat_stoolDuplTax))
+  colnames(dat_stoolOrigTax)[orig_column] <- paste0("sample", i, "_orig")
+  colnames(dat_stoolDuplTax)[dupl_column] <- paste0("sample", i, "_dupl")
+}
+
+# create a joint dataset
+dat_x <- dat_stoolOrigTax %>% 
+  select(species, starts_with("sample")) %>% 
+  tidyr::pivot_longer(-species, names_to = "sample", values_to = "value_orig") %>% 
+  mutate(sample = gsub(sample, pattern = "_orig", replacement = ""))
+dat_y <- dat_stoolDuplTax %>% 
+  select(species, starts_with("sample")) %>% 
+  tidyr::pivot_longer(-species, names_to = "sample", values_to = "value_dupl") %>% 
+  mutate(sample = gsub(sample, pattern = "_dupl", replacement = ""))
+dat_wide <- dat_x %>% 
+  dplyr::full_join(dat_y, by = c("species", "sample")) %>% 
+  mutate(value_orig = case_when(is.na(value_orig) ~ 0,
+                                TRUE              ~ value_orig),
+         value_dupl = case_when(is.na(value_dupl) ~ 0,
+                                TRUE              ~ value_dupl))
+
+# reshape to proper long format
+dat_long <- dat_wide %>% 
+  tidyr::pivot_longer(-c("species", "sample"), names_to = "value_type") %>% 
+  mutate(value_type = gsub(value_type, pattern = "value_", replacement = ""))
+```
+
+**Correlations per sample**
+
+```{r}
+# calculate correlations
+dat_wide %>% 
+  group_by(sample) %>% 
+  summarize(corr = cor(value_orig, value_dupl)) %>% 
+  ungroup() %>% 
+  summarize(minCorr_perSample    = min(corr),
+            meanCorr_perSample   = mean(corr),
+            medianCorr_perSample = median(corr),
+            maxCorr_perSample    = max(corr)) %>% 
+  kable(digits = 2) %>% 
+  kable_styling()
+```
+
+
+**Correlations per species**
+
+```{r}
+#| warning: false
+
+# calculate correlations
+dat_wide %>% 
+  group_by(species) %>% 
+  summarize(corr = cor(value_orig, value_dupl)) %>% 
+  ungroup() %>% 
+  summarize(minCorr_perSpecies    = min(corr,    na.rm = TRUE),
+            meanCorr_perSpecies   = mean(corr,   na.rm = TRUE),
+            medianCorr_perSpecies = median(corr, na.rm = TRUE),
+            maxCorr_perSpecies    = max(corr,    na.rm = TRUE)) %>% 
+  kable(digits = 2) %>% 
+  kable_styling()
+```
+
+
+**Coefficients of variation**
+
+```{r}
+# CoV for original measurements
+cov_orig <- sd(dat_wide$value_orig) / mean(dat_wide$value_orig)
+# CoV for duplicated measurements
+cov_dupl <- sd(dat_wide$value_dupl) / mean(dat_wide$value_dupl)
+```
+
+CoV original measurements (based on arithmetic mean `r round(mean(dat_wide$value_orig), 2)`): `r round(cov_orig, 2)`  
+CoV duplicate measurements (based on arithmetic mean `r round(mean(dat_wide$value_dupl), 2)`): `r round(cov_dupl, 2)`  
+
+
+**Intra-Class Correlation**
+
+We estimate one ICC for every one of the `r length(unique(dat_long$species))` species since the levels of abundances are vastly different between the species.  
+For each species we first estimate the following linear mixed regression model:
+
+- dependent variable: relative abundance
+- independent variables: sample indicator (as fixed effect), binary indicator if 'original' or 'duplicated' sample (as random effect).
+
+Based on this model we then estimate the ICC based on the random effect variance $\sigma^2_\delta$ and the residual variance $\sigma^2_\epsilon$:
+$$
+\frac{\sigma^2_\delta}{\sigma^2_\delta + \sigma^2_\epsilon}
+$$
+
+```{r}
+# estimate one ICC per species
+species_vec <- dat_long$species %>% unique() %>% as.character()
+icc_vector  <- sapply(species_vec, function(spec) {
+  model <- dat_long %>% 
+    filter(species == spec) %>% 
+    mutate(sample     = factor(sample),
+           value_type = factor(value_type)) %>% 
+    gam(value ~ sample + s(value_type, bs = "re"), data = .)
+  
+  
+  # extract ICC from the model
+  sigma2 <- model$sig2
+  delta  <- mgcv::gam.vcomp(model) %>% unname()
+  delta2 <- delta^2
+  icc    <- delta2 / (delta2 + sigma2)
+  
+  return(icc)
+})
+
+# print a summary table
+data.frame(min_ICC    = min(icc_vector),
+           q2.5_ICC   = quantile(icc_vector, probs = 0.025) %>% unname(),
+           q5_ICC     = quantile(icc_vector, probs = 0.05) %>% unname(),
+           mean_ICC   = mean(icc_vector),
+           median_ICC = median(icc_vector),
+           q95_ICC    = quantile(icc_vector, probs = 0.95) %>% unname(),
+           q97.5_ICC  = quantile(icc_vector, probs = 0.975) %>% unname(),
+           max_ICC    = max(icc_vector)) %>% 
+  kable(digits = 2) %>% 
+  kable_styling()
+```
+
+Species with a higher ICC:
+
+```{r}
+data.frame(species = names(icc_vector),
+           icc     = unname(icc_vector)) %>% 
+  filter(icc > 0.2) %>% 
+  arrange(desc(icc)) %>% 
+  kable(digits = 2) %>% 
+  kable_styling()
+```

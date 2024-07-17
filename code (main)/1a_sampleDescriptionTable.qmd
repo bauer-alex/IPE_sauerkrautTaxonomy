@@ -1,0 +1,159 @@
+---
+title: "Sauerkraut study - Sample Description Table"
+format:
+  html:
+    toc: true
+    code-fold: true
+    embed-resources: true
+---
+
+```{r packages}
+#| warning: false
+
+library(sauerkrautTaxonomyBuddy)
+library(SummarizedExperiment) # microbiome analysis
+library(mia)                  # microbiome analysis
+
+library(dplyr)      # data handling
+library(tidyr)      # data transformation
+library(kableExtra) # print tables
+```
+
+
+# Data preparation
+
+```{r set file paths}
+define_dataPaths()
+```
+
+```{r read data}
+#| warning: false
+
+tse <- readAndPrepare_mainTaxonomicData(path_groupInfoRdata               = path_groupInfoRdata,
+                                        path_participantRdata             = path_participantRdata,
+                                        path_samplesIDxlsx                = path_samplesIDxlsx,
+                                        path_dietInfoCsv                  = path_dietInfoCsv,
+                                        path_nutrientInfoCsv              = path_nutrientInfoCsv,
+                                        path_bloodMetabolomeXlsx          = path_bloodMetabolomeXlsx,
+                                        path_stoolMetabolomeXlsx          = path_stoolMetabolomeXlsx,
+                                        path_T4questXlsx                  = path_T4questXlsx,
+                                        path_stoolInfoXlsx                = path_stoolInfoXlsx,
+                                        path_bodyMeasuresXlsx             = path_bodyMeasuresXlsx,
+                                        path_absTaxonomyData              = path_absTaxonomyData,
+                                        path_relTaxonomyData              = path_relTaxonomyData,
+                                        path_sampleLookupXlsx             = path_sampleLookupXlsx,
+                                        path_krautLookupXlsx              = path_krautLookupXlsx,
+                                        path_bloodMarkerBostonRdata       = path_bloodMarkerBostonRdata,
+                                        path_bloodMarkerZentrallaborRdata = path_bloodMarkerZentrallaborRdata,
+                                        path_bloodMarkerBostonXlsx        = path_bloodMarkerBostonXlsx,
+                                        path_bloodMarkerZentrallaborXlsx  = path_bloodMarkerZentrallaborXlsx,
+                                        aggregation_level                 = "species",
+                                        exclude_sickParticipants          = "no exclusion")
+
+dat <- tse %>% 
+  colData() %>% 
+  as.data.frame()
+```
+
+
+# Sample description table
+
+For the below table, medicated participants were already excluded from the data.
+Time points of participants with sickness were instead not excluded.
+
+Listed statistics:
+
+- for gender: N (%)
+- for age and BMI: mean +/- standard deviation (min - max)
+
+
+Hypothesis tests:
+
+- gender: Chi-squared test
+- age: Welch test (two-sample t-test without assumed identity of variances)
+- BMI: Welch test (two-sample t-test without assumed identity of variances)
+
+
+```{r table preparations}
+# create a dataset only with the relevant information
+dat_desc <- dat %>%
+  distinct(participant_id, .keep_all = TRUE) %>% 
+  mutate(bmi_cat = case_when(bmi_t0 < 18.5 ~ "Underweight",
+                             bmi_t0 < 25   ~ "Normal",
+                             bmi_t0 < 30   ~ "Overweight",
+                             TRUE          ~ "Obesity I"),
+         bmi_cat = factor(bmi_cat, levels = c("Underweight", "Normal", "Overweight", "Obesity I"))) %>% 
+  select(participant_id, group, gender, age, bmi_t0, bmi_cat)
+
+# 1a) gender frequency table
+gender_tab          <- table(dat_desc$gender)
+gender_pTab         <- prop.table(gender_tab)
+gender_tab_grouped  <- table(dat_desc$group, dat_desc$gender)
+gender_pTab_grouped <- prop.table(gender_tab_grouped, margin = 1)
+
+# 1b) chi-squared test for gender distribution between groups
+gender_test <- chisq.test(gender_tab_grouped, correct = FALSE)
+
+
+# 2a) age statistics
+mean_age        <- mean(dat_desc$age) %>% round(1)
+mean_age_fresh  <- mean(dat_desc$age[dat_desc$group == "Fresh first"]) %>% round(1)
+mean_age_past   <- mean(dat_desc$age[dat_desc$group == "Pasteurized first"]) %>% round(1)
+sd_age          <- sd(dat_desc$age)
+sd_age_fresh    <- sd(dat_desc$age[dat_desc$group == "Fresh first"])
+sd_age_past     <- sd(dat_desc$age[dat_desc$group == "Pasteurized first"])
+range_age       <- range(dat_desc$age)
+range_age_fresh <- range(dat_desc$age[dat_desc$group == "Fresh first"])
+range_age_past  <- range(dat_desc$age[dat_desc$group == "Pasteurized first"])
+
+# 2b) Welch test for age distribution between groups
+age_test <- t.test(dat_desc$age ~ dat_desc$group, var.equal = FALSE)
+
+
+# 3a) BMI statistics
+mean_BMI        <- mean(dat_desc$bmi_t0) %>% round(1)
+mean_BMI_fresh  <- mean(dat_desc$bmi_t0[dat_desc$group == "Fresh first"]) %>% round(1)
+mean_BMI_past   <- mean(dat_desc$bmi_t0[dat_desc$group == "Pasteurized first"]) %>% round(1)
+sd_BMI          <- sd(dat_desc$bmi_t0) %>% round(1)
+sd_BMI_fresh    <- sd(dat_desc$bmi_t0[dat_desc$group == "Fresh first"]) %>% round(1)
+sd_BMI_past     <- sd(dat_desc$bmi_t0[dat_desc$group == "Pasteurized first"]) %>% round(1)
+range_BMI       <- range(dat_desc$bmi_t0) %>% round(1)
+range_BMI_fresh <- range(dat_desc$bmi_t0[dat_desc$group == "Fresh first"]) %>% round(1)
+range_BMI_past  <- range(dat_desc$bmi_t0[dat_desc$group == "Pasteurized first"]) %>% round(1)
+
+# 3b) Welch test for BMI distribution between groups
+BMI_test <- t.test(dat_desc$bmi_t0 ~ dat_desc$group, var.equal = FALSE)
+```
+
+
+```{r final table}
+data.frame(Characteristic = c("N",
+                              "Sex - Male", "Sex - Female",
+                              "mean Age +/- std. dev. (min. - max.)",
+                              "mean BMI +/- std. dev. (min. - max.)"),
+           Full_sample    = c(dat %>% pull(participant_id) %>% unique() %>% length(),
+                              paste0(gender_tab["M"], " (", 100*round(gender_pTab["M"], 3), "%)"),
+                              paste0(gender_tab["W"], " (", 100*round(gender_pTab["W"], 3), "%)"),
+                              paste0(mean_age, " +/- ", round(sd_age, 1), " (", paste(range_age, collapse = " - "), ")"),
+                              paste0(mean_BMI, " +/- ", round(sd_BMI, 1), " (", paste(range_BMI, collapse = " - "), ")")),
+           Fresh_first    = c(dat %>% filter(group == "Fresh first") %>%  pull(participant_id) %>% unique() %>% length(),
+                              paste0(gender_tab_grouped["Fresh first", "M"], " (", 100*round(gender_pTab_grouped["Fresh first", "M"], 3), "%)"),
+                              paste0(gender_tab_grouped["Fresh first", "W"], " (", 100*round(gender_pTab_grouped["Fresh first", "W"], 3), "%)"),
+                              paste0(mean_age_fresh, " +/- ", round(sd_age_fresh, 1), " (", paste(range_age_fresh, collapse = " - "), ")"),
+                              paste0(mean_BMI_fresh, " +/- ", round(sd_BMI_fresh, 1), " (", paste(range_BMI_fresh, collapse = " - "), ")")),
+           Past_first     = c(dat %>% filter(group == "Pasteurized first") %>%  pull(participant_id) %>% unique() %>% length(),
+                              paste0(gender_tab_grouped["Pasteurized first", "M"], " (", 100*round(gender_pTab_grouped["Pasteurized first", "M"], 3), "%)"),
+                              paste0(gender_tab_grouped["Pasteurized first", "W"], " (", 100*round(gender_pTab_grouped["Pasteurized first", "W"], 3), "%)"),
+                              paste0(mean_age_past, " +/- ", round(sd_age_past, 1), " (", paste(range_age_past, collapse = " - "), ")"),
+                              paste0(mean_BMI_past, " +/- ", round(sd_BMI_past, 1), " (", paste(range_BMI_past, collapse = " - "), ")")),
+           p_value        = c("",
+                              round(gender_test$p.value, 4), "",
+                              round(age_test$p.value, 4),
+                              round(BMI_test$p.value, 4))) %>% 
+  rename("Full sample"              = Full_sample,
+         "Fresh intervention first" = Fresh_first,
+         "Past. intervention first" = Past_first,
+         "p-value"                  = p_value) %>% 
+  kable() %>% 
+  kable_styling()
+```

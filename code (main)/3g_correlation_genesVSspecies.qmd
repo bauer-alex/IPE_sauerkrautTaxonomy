@@ -1,0 +1,396 @@
+---
+title: "Sauerkraut study - Correlation of genes with species"
+format:
+  html:
+    toc: true
+    code-fold: true
+    embed-resources: true
+---
+
+```{r packages}
+#| warning: false
+
+library(sauerkrautTaxonomyBuddy)
+library(SummarizedExperiment) # microbiome analysis
+library(mia)                  # microbiome analysis
+
+library(readxl)     # read Excel files
+
+library(dplyr)      # data handling
+library(tidyr)      # data transformation
+library(ggplot2)    # data visualization
+library(patchwork)  # grid of ggplot2
+library(kableExtra) # print tables
+
+# set ggplot2 theme
+theme_set(
+  theme_minimal() +
+    theme(plot.title       = element_text(hjust = 0.5),
+          plot.subtitle    = element_text(hjust = 0.5),
+          panel.grid.minor = element_blank(),
+          plot.background  = element_rect(fill = "white", color = "white"))
+)
+
+# suppress scientific notation (= e notation of decimal numbers)
+options(scipen = 999)
+```
+
+
+# Data preparation
+
+```{r}
+# read the Excel file from Till Robin, mapping individual genes to specific SCFAs
+path_SCFAgenes <- "9_lookup_SCFA-KEGG-KO.xlsx"
+dat_scfaLookup <- read_excel(path_SCFAgenes, sheet = 1) %>% dplyr::select(SCFA, KO)
+```
+
+```{r set file paths}
+define_dataPaths()
+```
+
+```{r read data}
+#| warning: false
+
+# read species data
+tse_species <- readAndPrepare_mainTaxonomicData(path_groupInfoRdata               = path_groupInfoRdata,
+                                                path_participantRdata             = path_participantRdata,
+                                                path_samplesIDxlsx                = path_samplesIDxlsx,
+                                                path_dietInfoCsv                  = path_dietInfoCsv,
+                                                path_nutrientInfoCsv              = path_nutrientInfoCsv,
+                                                path_bloodMetabolomeXlsx          = path_bloodMetabolomeXlsx,
+                                                path_stoolMetabolomeXlsx          = path_stoolMetabolomeXlsx,
+                                                path_T4questXlsx                  = path_T4questXlsx,
+                                                path_stoolInfoXlsx                = path_stoolInfoXlsx,
+                                                path_bodyMeasuresXlsx             = path_bodyMeasuresXlsx,
+                                                path_absTaxonomyData              = path_absTaxonomyData,
+                                                path_relTaxonomyData              = path_relTaxonomyData,
+                                                path_sampleLookupXlsx             = path_sampleLookupXlsx,
+                                                path_krautLookupXlsx              = path_krautLookupXlsx,
+                                                path_bloodMarkerBostonRdata       = path_bloodMarkerBostonRdata,
+                                                path_bloodMarkerZentrallaborRdata = path_bloodMarkerZentrallaborRdata,
+                                                path_bloodMarkerBostonXlsx        = path_bloodMarkerBostonXlsx,
+                                                path_bloodMarkerZentrallaborXlsx  = path_bloodMarkerZentrallaborXlsx,
+                                                aggregation_level                 = "species",
+                                                exclude_rareStoolBacteria         = TRUE,
+                                                exclude_sickParticipants          = "taxonomy paper")
+
+# read gene data
+tse_genes <- readAndPrepare_mainFunctionalKOdata(
+  path_KEGG_KO                      = path_KEGGKO_funData,
+  path_KEGG_pathways                = path_KEGGPathways_funData,
+  path_groupInfoRdata               = path_groupInfoRdata,
+  path_participantRdata             = path_participantRdata,
+  path_samplesIDxlsx                = path_samplesIDxlsx,
+  path_dietInfoCsv                  = path_dietInfoCsv,
+  path_nutrientInfoCsv              = path_nutrientInfoCsv,
+  path_bodyMeasuresXlsx             = path_bodyMeasuresXlsx,
+  path_bloodMetabolomeXlsx          = path_bloodMetabolomeXlsx,
+  path_stoolMetabolomeXlsx          = path_stoolMetabolomeXlsx,
+  path_T4questXlsx                  = path_T4questXlsx,
+  path_stoolInfoXlsx                = path_stoolInfoXlsx,
+  path_sampleLookupXlsx             = path_sampleLookupXlsx,
+  path_krautLookupXlsx              = path_krautLookupXlsx,
+  path_bloodMarkerBostonRdata       = path_bloodMarkerBostonRdata,
+  path_bloodMarkerZentrallaborRdata = path_bloodMarkerZentrallaborRdata,
+  path_bloodMarkerBostonXlsx        = path_bloodMarkerBostonXlsx,
+  path_bloodMarkerZentrallaborXlsx  = path_bloodMarkerZentrallaborXlsx,
+  exclude_sickParticipants          = "taxonomy paper"
+)
+
+
+# create joint tables with all relevant information
+dat_species <- tse_species %>% mia::meltAssay(assay.type = "relAbd", add_row_data = TRUE)
+dat_genes   <- tse_genes %>% mia::meltAssay(assay.type = "tpmAbd", add_row_data = TRUE) %>% 
+  dplyr::rename(gene = FeatureID)
+```
+
+
+```{r filter data}
+# remove low abundance genes
+lowAbundanceGenes <- dat_genes %>% 
+  mutate(relevantAbundance = (tpmAbd >= 10)) %>% 
+  group_by(gene) %>% 
+  summarize(lowTPMabundance = (sum(relevantAbundance) < 0.1*n())) %>% 
+  filter(lowTPMabundance) %>% 
+  pull(gene) %>% 
+  as.character()
+
+dat_genes <- dat_genes %>% 
+  filter(!(gene %in% lowAbundanceGenes))
+
+# limit genes to SCFA-related genes
+dat_genes <- dat_genes %>% 
+  filter(gene %in% dat_scfaLookup$KO) %>% 
+  mutate(gene = factor(gene))
+```
+
+```{r data to wide format}
+# create one big joint table with one row per sample
+dat_species_wide <- dat_species %>% 
+  mutate(species = paste0("species_", species)) %>% 
+  tidyr::pivot_wider(id_cols = SampleID, names_from = species, values_from = relAbd)
+dat_genes_wide <- dat_genes %>% 
+  mutate(gene = paste0("gene_", gene)) %>% 
+  tidyr::pivot_wider(id_cols = SampleID, names_from = gene, values_from = tpmAbd)
+dat <- dat_species_wide %>% 
+  dplyr::left_join(dat_genes_wide, by = "SampleID")
+```
+
+
+# Correlation matrix between species and genes
+
+Compare `r length(unique(dat_genes$gene))` SCFA-related genes with relevant abundance with
+`r length(unique(dat_species$species))` species with relevant abundance.
+
+```{r}
+#| column: page
+#| fig-width: 12
+#| fig-height: 25
+
+# create a correlation matrix with species in rows and genes in columns
+cor_mat <- cor(x = dat %>% select(starts_with("species_")),
+               y = dat %>% select(starts_with("gene_")))
+
+# pretty up the column and row names
+colnames(cor_mat)  <- colnames(cor_mat)  %>% gsub(pattern = "gene_",    replacement = "")
+row.names(cor_mat) <- row.names(cor_mat) %>% gsub(pattern = "species_", replacement = "")
+
+# reformat the correlation matrix to a ggplot'able data.frame
+plot_dat <- data.frame(species = rep(row.names(cor_mat), times = ncol(cor_mat)),
+                       gene    = rep(colnames(cor_mat),  each  = nrow(cor_mat)),
+                       corr    = as.vector(cor_mat))
+
+# add species and gene categories to the data
+plot_dat <- plot_dat %>% 
+  dplyr::left_join(dat_scfaLookup, by = c("gene" = "KO")) %>% 
+  dplyr::left_join(dat_species %>% select(phylum, species) %>% distinct(species, .keep_all = TRUE), by = "species") %>% 
+  mutate(phylum = droplevels(phylum))
+
+# sort the genes according to the average highest correlations
+genes_sort <- plot_dat %>% 
+  group_by(gene) %>% 
+  summarize(avg_corr = mean(corr)) %>% 
+  arrange(desc(avg_corr)) %>% 
+  pull(gene)
+plot_dat <- plot_dat %>% 
+  mutate(gene = factor(gene, levels = genes_sort))
+
+# sort species according to the correlation with the gene with the on average highest correlations
+species_sort <- plot_dat %>% 
+  filter(gene == "K03737") %>% 
+  group_by(species) %>% 
+  summarize(avg_corr = mean(corr)) %>% 
+  arrange(desc(avg_corr)) %>% 
+  pull(species)
+plot_dat <- plot_dat %>% 
+  mutate(species = factor(species, levels = rev(species_sort)))
+
+# create correlation matrix plot
+ggplot(plot_dat, aes(y = species, x = gene)) +
+  geom_tile(aes(fill = corr)) +
+  facet_grid(phylum ~ SCFA, space = "free", scales = "free") +
+  scale_fill_gradient2("correlation", low = "firebrick2", high = "dodgerblue2", mid = "white") +
+  theme(axis.text.y = element_text(size = 4),
+        axis.text.x = element_text(angle = 90, size = 7),
+        axis.ticks  = element_blank(),
+        panel.grid  = element_blank())
+# ggsave("12_correlation_genesVSspecies.png", height = 25, width = 12)
+```
+
+## Test for significant correlations
+
+Correlation test, corrected for multiple testing with Benjamini-Hochberg correction with FDR threshold of 0.1.
+
+```{r}
+# loop through all species
+corTest_datList <- lapply(colnames(dat)[grepl("species_", colnames(dat))], function(spec) {
+  
+  # loop through all genes
+  corTest_vec <- sapply(colnames(dat)[grepl("gene_", colnames(dat))], function(gen) {
+    cor.test(x = dat[[spec]],
+             y = dat[[gen]])$p.value
+  })
+  cor_vec <- sapply(colnames(dat)[grepl("gene_", colnames(dat))], function(gen) {
+    cor(x = dat[[spec]],
+        y = dat[[gen]])
+  })
+  
+  data.frame(species = gsub(spec, pattern = "species_", replacement = ""),
+             gene    = gsub(names(corTest_vec), pattern = "gene_", replacement = ""),
+             corr    = unname(cor_vec),
+             pvalue  = unname(corTest_vec))
+})
+corTest_dat <- corTest_datList %>% dplyr::bind_rows()
+
+# apply multiple testing correction (Benjamini-Hochberg)
+corTest_dat <- corTest_dat %>% 
+  mutate(qvalue       = p.adjust(pvalue, method = "BH"),
+         significance = qvalue < 0.1)
+
+data.frame(measure = c("number of significant correlations",
+                       "number of non-significant correlations",
+                       "lowest absolute correlation that is significant",
+                       "highest absolute correlation that is not significant"),
+           value   = c(sum(corTest_dat$significance == TRUE),
+                       sum(corTest_dat$significance == FALSE),
+                       corTest_dat %>% filter(significance == TRUE)  %>% pull(corr) %>% abs() %>% min(),
+                       corTest_dat %>% filter(significance == FALSE) %>% pull(corr) %>% abs() %>% max())) %>% 
+  mutate(value = round(value, 3)) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+## Instead check the strength of the correlations
+
+```{r}
+data.frame(measure = c("number of correlations over 0.9",
+                       "number of correlations over 0.8",
+                       "number of correlations over 0.7",
+                       "number of correlations over 0.6",
+                       "number of correlations over 0.5",
+                       "number of correlations over 0.4",
+                       "number of correlations over 0.3",
+                       "number of correlations between -0.3 and 0.3",
+                       "number of correlations below -0.3",
+                       "number of correlations below -0.4",
+                       "number of correlations below -0.5",
+                       "number of correlations below -0.6",
+                       "number of correlations below -0.7",
+                       "number of correlations below -0.8",
+                       "number of correlations below -0.9"),
+           value   = c(sum(corTest_dat$corr > 0.9),
+                       sum(corTest_dat$corr > 0.8),
+                       sum(corTest_dat$corr > 0.7),
+                       sum(corTest_dat$corr > 0.6),
+                       sum(corTest_dat$corr > 0.5),
+                       sum(corTest_dat$corr > 0.4),
+                       sum(corTest_dat$corr > 0.3),
+                       sum(corTest_dat$corr > -.3 & corTest_dat$corr < 0.3),
+                       sum(corTest_dat$corr < -.3),
+                       sum(corTest_dat$corr < -.4),
+                       sum(corTest_dat$corr < -.5),
+                       sum(corTest_dat$corr < -.6),
+                       sum(corTest_dat$corr < -.7),
+                       sum(corTest_dat$corr < -.8),
+                       sum(corTest_dat$corr < -.9))) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+##### All correlations above 0.5
+
+The following table is sorted by SCFAs, and in the SCFAs sorted by correlation strength
+
+```{r}
+corTest_dat %>% 
+  filter(abs(corr) > 0.5) %>% 
+  dplyr::left_join(dat_scfaLookup, by = c("gene" = "KO")) %>% 
+  dplyr::left_join(dat_species %>% select(phylum, species) %>% distinct(species, .keep_all = TRUE), by = "species") %>% 
+  select(SCFA, gene, species, phylum, corr) %>% 
+  mutate(corr = round(corr, 2)) %>% 
+  arrange(SCFA, desc(corr)) %>% 
+  dplyr::rename(correlation = corr) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+
+# Correlation matrix between species and genes' SCFA-relations
+
+Average correlations between each species and all the genes that are related to a specific SCFA.
+Species are sorted by their average correlation with Butyryl-CoA genes.
+
+```{r}
+#| fig-height: 25
+#| message: false
+
+plot_dat2 <- plot_dat %>% 
+  group_by(species, SCFA) %>% 
+  summarize(phylum    = first(phylum),
+            mean_corr = mean(corr))
+
+# sort species according to the correlation with the Butyryl-CoA
+species_sort <- plot_dat2 %>% 
+  filter(SCFA == "Butyryl-CoA") %>% 
+  group_by(species) %>% 
+  summarize(avg_corr = mean(mean_corr)) %>% 
+  arrange(desc(avg_corr)) %>% 
+  pull(species)
+plot_dat2 <- plot_dat2 %>% 
+  mutate(species = factor(species, levels = rev(species_sort)))
+
+# create correlation matrix plot
+ggplot(plot_dat2, aes(y = species, x = SCFA)) +
+  geom_tile(aes(fill = mean_corr)) +
+  facet_grid(phylum ~ ., space = "free", scales = "free") +
+  scale_fill_gradient2("average\ncorrelation", low = "firebrick2", high = "dodgerblue2", mid = "white") +
+  theme(axis.text.y = element_text(size = 4),
+        axis.text.x = element_text(angle = 90, size = 7),
+        axis.ticks  = element_blank(),
+        panel.grid  = element_blank())
+# ggsave("12_correlation_SCFAsVSspecies.png", height = 25, width = 6)
+```
+
+
+# Correlation matrix between species' phylum and genes
+
+Average correlations between each gene and all the species that are related to a specific phylum.
+Genes are sorted by their average correlation with Euryarchaeota species.
+
+```{r}
+#| column: page
+#| fig-width: 12
+#| fig-height: 3
+#| message: false
+
+plot_dat3 <- plot_dat %>% 
+  group_by(gene, phylum) %>% 
+  summarize(SCFA      = first(SCFA),
+            mean_corr = mean(corr))
+
+# sort genes according to the correlation with the Butyryl-CoA
+genes_sort <- plot_dat3 %>% 
+  filter(phylum == "Euryarchaeota") %>% 
+  group_by(gene) %>% 
+  summarize(avg_corr = mean(mean_corr)) %>% 
+  arrange(desc(avg_corr)) %>% 
+  pull(gene)
+plot_dat3 <- plot_dat3 %>% 
+  mutate(gene = factor(gene, levels = rev(genes_sort)))
+
+# create correlation matrix plot
+ggplot(plot_dat3, aes(y = phylum, x = gene)) +
+  geom_tile(aes(fill = mean_corr)) +
+  facet_grid(. ~ SCFA, space = "free", scales = "free") +
+  scale_fill_gradient2("average\ncorrelation", low = "firebrick2", high = "dodgerblue2", mid = "white") +
+  theme(axis.text.y = element_text(size = 4),
+        axis.text.x = element_text(angle = 90, size = 7),
+        axis.ticks  = element_blank(),
+        panel.grid  = element_blank())
+# ggsave("12_correlation_genesVSphylum.png", height = 3, width = 12)
+```
+
+
+# Correlation matrix between species' phylum and genes' SCFA-relations
+
+Average correlations between all species related to a specific phylum and all the genes that are related to a specific SCFA.
+Species are sorted by their average correlation with Butyryl-CoA genes.
+
+```{r}
+#| fig-height: 3
+#| message: false
+
+plot_dat4 <- plot_dat %>% 
+  group_by(phylum, SCFA) %>% 
+  summarize(mean_corr = mean(corr))
+
+# create correlation matrix plot
+ggplot(plot_dat4, aes(y = phylum, x = SCFA)) +
+  geom_tile(aes(fill = mean_corr)) +
+  scale_fill_gradient2("average\ncorrelation", low = "firebrick2", high = "dodgerblue2", mid = "white") +
+  theme(axis.text.y = element_text(size = 4),
+        axis.text.x = element_text(angle = 90, size = 7),
+        axis.ticks  = element_blank(),
+        panel.grid  = element_blank())
+# ggsave("12_correlation_SCFAsVSphylum.png", height = 3, width = 6)
+```

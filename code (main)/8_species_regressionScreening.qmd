@@ -1,0 +1,2248 @@
+---
+title: "Sauerkraut study - Regression-based Screening on species' abundance"
+format:
+  html:
+    toc: true
+    code-fold: true
+    embed-resources: true
+---
+
+```{r packages}
+#| warning: false
+
+library(sauerkrautTaxonomyBuddy)
+library(SummarizedExperiment) # microbiome analysis
+library(mia)                  # microbiome analysis
+library(ggtree)               # plot phylogenetic trees
+
+library(readxl)     # read Excel files
+library(mgcv)       # regression model
+library(NBZIMM)     # zero-inflated Gaussian mixed regression models
+library(parallel)   # parallelize processes on multiple cores
+
+library(dplyr)      # data handling
+library(tidyr)      # data transformation
+library(ggplot2)    # data visualization
+library(patchwork)  # grid of ggplot2
+library(ggpubr)     # further ggplot2 grid customizations
+library(kableExtra) # print tables
+
+# set ggplot2 theme
+theme_set(
+  theme_minimal() +
+    theme(plot.title       = element_text(hjust = 0.5),
+          plot.subtitle    = element_text(hjust = 0.5),
+          panel.grid.minor = element_blank(),
+          plot.background  = element_rect(fill = "white", color = "white"))
+)
+
+# suppress scientific notation (= e notation of decimal numbers)
+options(scipen = 999)
+```
+
+
+# Data preparation
+
+```{r set file paths}
+define_dataPaths()
+```
+
+```{r read data}
+#| warning: false
+
+tse <- readAndPrepare_mainTaxonomicData(path_groupInfoRdata               = path_groupInfoRdata,
+                                        path_participantRdata             = path_participantRdata,
+                                        path_samplesIDxlsx                = path_samplesIDxlsx,
+                                        path_dietInfoCsv                  = path_dietInfoCsv,
+                                        path_nutrientInfoCsv              = path_nutrientInfoCsv,
+                                        path_bloodMetabolomeXlsx          = path_bloodMetabolomeXlsx,
+                                        path_stoolMetabolomeXlsx          = path_stoolMetabolomeXlsx,
+                                        path_T4questXlsx                  = path_T4questXlsx,
+                                        path_stoolInfoXlsx                = path_stoolInfoXlsx,
+                                        path_bodyMeasuresXlsx             = path_bodyMeasuresXlsx,
+                                        path_absTaxonomyData              = path_absTaxonomyData,
+                                        path_relTaxonomyData              = path_relTaxonomyData,
+                                        path_sampleLookupXlsx             = path_sampleLookupXlsx,
+                                        path_krautLookupXlsx              = path_krautLookupXlsx,
+                                        path_bloodMarkerBostonRdata       = path_bloodMarkerBostonRdata,
+                                        path_bloodMarkerZentrallaborRdata = path_bloodMarkerZentrallaborRdata,
+                                        path_bloodMarkerBostonXlsx        = path_bloodMarkerBostonXlsx,
+                                        path_bloodMarkerZentrallaborXlsx  = path_bloodMarkerZentrallaborXlsx,
+                                        aggregation_level                 = "species",
+                                        exclude_rareStoolBacteria         = TRUE,
+                                        exclude_sickParticipants          = "taxonomy paper")
+
+# create a joint table with all relevant information
+dat <- tse %>% mia::meltAssay(assay.type = "relAbd", add_row_data = TRUE, add_col_data = TRUE)
+```
+
+```{r}
+# prepare data for regression models
+dat <- dat %>% 
+  filter(intervention != "FollowUp") %>% 
+  mutate(relAbd_log     = log(relAbd + 1),
+         intervention   = case_when(treatment == "Baseline" ~ "Baseline",
+                                    TRUE                    ~ intervention),
+         age_centered50 = age - 50,
+         bmi_centered25 = bmi_t0 - 25,
+         age_cat        = case_when(age < 50 ~ paste0(min(age), "-49"),
+                                    TRUE     ~ paste0("50-", max(age))),
+         age_cat        = factor(age_cat),
+         bmi_cat        = case_when(bmi_t0 < 25 ~ paste0("[", floor(min(bmi_t0)), ", 25)"),
+                                    TRUE        ~ paste0("[25, ", ceiling(max(bmi_t0)), "]")),
+         bmi_cat        = factor(bmi_cat),
+         phase          = case_when(timepoint %in% c("T3","T4") ~ "phase 2",
+                                    TRUE                        ~ "phase 1"),
+         phase          = factor(phase))
+```
+
+
+# Run screening
+
+Run screening on `r length(unique(dat$FeatureID))` not-low-abundance species.
+
+For each species, a Generalized Mixed Regression Model is estimated, identical to the
+models estimated for the blood measurements for the blood paper, with response
+parameter the relative abundance.
+
+**Model selection** is performed by estimating either estimating
+(A) a Gaussian model, and
+(B) a Gaussian model on 'log(y + 1)' transformed values, or
+(A) a zero-inflated Gaussian model (with only an intercept predictor for the ZI part, as a general excess zero correction), and
+(B) a zero-inflated Gaussian model on 'log(y + 1)' transformed values
+for each gene and selecting the best performing one of the respective two as the final model.
+If at least 10% of a gene's observations are zero values then the zero-inflated models
+are estimated, otherwise the non-zero-inflated models are estimated.
+
+Notes:
+
+- For the non-zero-inflated models the best model is chosen based on the share of explained deviance
+- For the zero-inflated models the best model is chosen based on the lower average of all absolute residuals,
+since these models are estimated based on a quasi-likelihood approach and the deviance is not available.
+
+**Unused alternatives**
+
+- a zero-inflated Poisson model could have been estimated on rounded values. However,
+a Poisson distribution is not able to account for more strongly right-skewed distributions
+with a stronger probability mass at zero
+- a Tweedie (p = 1.5) distribution would be a right-skewed continuous distribution with
+also potential probability mass at zero. However, since (1) it's not a proper established distribution
+and (2) the used log transformation already accounts for right-skewedness we don't need it and don't use it
+
+**Correction for multiple testing** is performed by applying the Benjamini-Hochberg (FDR) method
+to all interventions' p-values.
+
+Additionally, the intervention effects for every model are estimated in separate **interactions with gender (male or female), age (above or below 50), baseline BMI (above or below 25)**.
+Independently for every interaction variable (age, sex, BMI) a multiple testing correction is applied.
+
+*Note:* For these screening analyses we use a significance threshold of 0.1 for q-values and 0.05 for uncorrected p-values.
+
+The models are estimated with `mgcv::gam()` and `NBZIMM::lme.zig()`.
+
+```{r}
+# helper function to estimate the models
+# - dat_model:     Dataset used for model estimation
+# - model_type:    One of c("Gaussian", "ZI Gaussian")
+# - model_formula: A model formula created with "as.formula"
+estimate_model <- function(dat_model, model_type, model_formula) {
+  
+  checkmate::assert_data_frame(dat_model)
+  checkmate::assert_choice(model_type, choices = c("Gaussian", "ZI Gaussian"))
+  checkmate::assert_class(model_formula, classes = "formula")
+  
+  
+  if (model_type == "Gaussian") {
+    model <- gam(model_formula, method = "REML", family = "gaussian", data = dat_model)
+    
+  } else { # model_type = "ZI Gaussian"
+    model <- tryCatch({ lme.zig(fixed     = model_formula,
+                                zi_fixed  = ~ 1,
+                                random    = ~ 1 | participant_id,
+                                zi_random = NULL,
+                                data      = dat_model) },
+                      error = function(e) { return(NULL) })
+  }
+  
+  return(model)
+}
+```
+
+```{r}
+# helper function to estimate the interaction models.
+# Returns a list with all three estimated models and the respective three summary tables.
+# Argument 'selected_model' is the label of the previously selected model type in the model selection process.
+estimate_interactionModels <- function(dat_model, selected_model) {
+  
+  if (selected_model == "ZI Gaussian") {
+    # age interaction model
+    model_ageInt <- estimate_model(dat_model     = dat_model,
+                                   model_type    = "ZI Gaussian",
+                                   model_formula = as.formula("relAbd ~ intervention + phase + gender + age_centered50 + bmi_centered25 + intervention:age_cat"))
+    if (is.null(model_ageInt)) { # if model estimation failed
+      model_ageInt <- estimate_model(dat_model     = dat_model,
+                                     model_type    = "Gaussian",
+                                     model_formula = as.formula("relAbd ~ intervention + phase + gender + age_centered50 + bmi_centered25 + s(participant_id, bs = 're') + intervention:age_cat"))
+    }
+    # sex interaction model
+    model_sexInt <- estimate_model(dat_model     = dat_model,
+                                   model_type    = "ZI Gaussian",
+                                   model_formula = as.formula("relAbd ~ intervention + phase + gender + age_centered50 + bmi_centered25 + intervention:gender"))
+    if (is.null(model_sexInt)) { # if model estimation failed
+      model_sexInt <- estimate_model(dat_model     = dat_model,
+                                     model_type    = "Gaussian",
+                                     model_formula = as.formula("relAbd ~ intervention + phase + gender + age_centered50 + bmi_centered25 + s(participant_id, bs = 're') + intervention:gender"))
+    }
+    # BMI interaction model
+    model_bmiInt <- estimate_model(dat_model     = dat_model,
+                                   model_type    = "ZI Gaussian",
+                                   model_formula = as.formula("relAbd ~ intervention + phase + gender + age_centered50 + bmi_centered25 + intervention:bmi_cat"))
+    if (is.null(model_bmiInt)) { # if model estimation failed
+      model_bmiInt <- estimate_model(dat_model     = dat_model,
+                                     model_type    = "Gaussian",
+                                     model_formula = as.formula("relAbd ~ intervention + phase + gender + age_centered50 + bmi_centered25 + s(participant_id, bs = 're') + intervention:bmi_cat"))
+    }
+    
+  } else if (selected_model == "ZI log-Gaussian") {
+    # age interaction model
+    model_ageInt <- estimate_model(dat_model     = dat_model,
+                                   model_type    = "ZI Gaussian",
+                                   model_formula = as.formula("relAbd_log ~ intervention + phase + gender + age_centered50 + bmi_centered25 + intervention:age_cat"))
+    if (is.null(model_ageInt)) { # if model estimation failed
+      model_ageInt <- estimate_model(dat_model     = dat_model,
+                                     model_type    = "Gaussian",
+                                     model_formula = as.formula("relAbd_log ~ intervention + phase + gender + age_centered50 + bmi_centered25 + s(participant_id, bs = 're') + intervention:age_cat"))
+    }
+    # sex interaction model
+    model_sexInt <- estimate_model(dat_model     = dat_model,
+                                   model_type    = "ZI Gaussian",
+                                   model_formula = as.formula("relAbd_log ~ intervention + phase + gender + age_centered50 + bmi_centered25 + intervention:gender"))
+    if (is.null(model_sexInt)) { # if model estimation failed
+      model_sexInt <- estimate_model(dat_model     = dat_model,
+                                     model_type    = "Gaussian",
+                                     model_formula = as.formula("relAbd_log ~ intervention + phase + gender + age_centered50 + bmi_centered25 + s(participant_id, bs = 're') + intervention:gender"))
+    }
+    # BMI interaction model
+    model_bmiInt <- estimate_model(dat_model     = dat_model,
+                                   model_type    = "ZI Gaussian",
+                                   model_formula = as.formula("relAbd_log ~ intervention + phase + gender + age_centered50 + bmi_centered25 + intervention:bmi_cat"))
+    if (is.null(model_bmiInt)) { # if model estimation failed
+      model_bmiInt <- estimate_model(dat_model     = dat_model,
+                                     model_type    = "Gaussian",
+                                     model_formula = as.formula("relAbd_log ~ intervention + phase + gender + age_centered50 + bmi_centered25 + s(participant_id, bs = 're') + intervention:bmi_cat"))
+    }
+    
+  } else if (selected_model == "Gaussian") {
+    # age interaction model
+    model_ageInt <- estimate_model(dat_model     = dat_model,
+                                   model_type    = "Gaussian",
+                                   model_formula = as.formula("relAbd ~ intervention + phase + gender + age_centered50 + bmi_centered25 + s(participant_id, bs = 're') + intervention:age_cat"))
+    # sex interaction model
+    model_sexInt <- estimate_model(dat_model     = dat_model,
+                                   model_type    = "Gaussian",
+                                   model_formula = as.formula("relAbd ~ intervention + phase + gender + age_centered50 + bmi_centered25 + s(participant_id, bs = 're') + intervention:gender"))
+    # BMI interaction model
+    model_bmiInt <- estimate_model(dat_model     = dat_model,
+                                   model_type    = "Gaussian",
+                                   model_formula = as.formula("relAbd ~ intervention + phase + gender + age_centered50 + bmi_centered25 + s(participant_id, bs = 're') + intervention:bmi_cat"))
+    
+  } else { # model_label == "log-Gaussian"
+    # age interaction model
+    model_ageInt <- estimate_model(dat_model     = dat_model,
+                                   model_type    = "Gaussian",
+                                   model_formula = as.formula("relAbd_log ~ intervention + phase + gender + age_centered50 + bmi_centered25 + s(participant_id, bs = 're') + intervention:age_cat"))
+    # sex interaction model
+    model_sexInt <- estimate_model(dat_model     = dat_model,
+                                   model_type    = "Gaussian",
+                                   model_formula = as.formula("relAbd_log ~ intervention + phase + gender + age_centered50 + bmi_centered25 + s(participant_id, bs = 're') + intervention:gender"))
+    # BMI interaction model
+    model_bmiInt <- estimate_model(dat_model     = dat_model,
+                                   model_type    = "Gaussian",
+                                   model_formula = as.formula("relAbd_log ~ intervention + phase + gender + age_centered50 + bmi_centered25 + s(participant_id, bs = 're') + intervention:bmi_cat"))
+  }
+  
+  
+  ### prepare results
+  # age interaction model
+  if (class(model_ageInt)[1] == "zigmm") {
+    tab_ageInt           <- summary(model_ageInt)$tTable
+    colnames(tab_ageInt) <- c("Estimate", "Std. Error", "DF", "t-value", "Pr(>|t|)") # make names consistent to gam tab names
+  } else { # non-ZI model
+    tab_ageInt           <- summary(model_ageInt)$p.table
+  }
+  # sex interaction model
+  if (class(model_sexInt)[1] == "zigmm") {
+    tab_sexInt           <- summary(model_sexInt)$tTable
+    colnames(tab_sexInt) <- c("Estimate", "Std. Error", "DF", "t-value", "Pr(>|t|)") # make names consistent to gam tab names
+  } else { # non-ZI model
+    tab_sexInt           <- summary(model_sexInt)$p.table
+  }
+  # BMI interaction model
+  if (class(model_bmiInt)[1] == "zigmm") {
+    tab_bmiInt           <- summary(model_bmiInt)$tTable
+    colnames(tab_bmiInt) <- c("Estimate", "Std. Error", "DF", "t-value", "Pr(>|t|)") # make names consistent to gam tab names
+  } else { # non-ZI model
+    tab_bmiInt           <- summary(model_bmiInt)$p.table
+  }
+
+  
+  list(model_ageInt = model_ageInt,
+       model_sexInt = model_sexInt,
+       model_bmiInt = model_bmiInt,
+       tab_ageInt   = tab_ageInt,
+       tab_sexInt   = tab_sexInt,
+       tab_bmiInt   = tab_bmiInt)
+}
+```
+
+
+```{r}
+# main screening function for species
+runScreening_oneSpecies <- function(sp) {
+  
+  message("Process species ", sp, " (", match(sp, species), "/", length(species), ")")
+  
+  dat_sp <- dat[dat$FeatureID == sp,]
+  
+  # 1) main model estimation, based on model selection
+  estimate_ZImodels <- sum(dat_sp$relAbd == 0) >= (0.1*nrow(dat_sp))
+  if (estimate_ZImodels) { # estimate zero-inflated models
+    
+    # these zero-inflated models sometimes run into an estimation error. In this case, ignore the respective model.
+    # If both models run into an estimation error, simply estimate the non-zero-inflated models instead.
+    model_list <- list("ZI Gaussian"     = estimate_model(dat_model     = dat_sp,
+                                                          model_type    = "ZI Gaussian",
+                                                          model_formula = as.formula("relAbd ~ intervention + phase + gender + age_centered50 + bmi_centered25")),
+                       "ZI log-Gaussian" = estimate_model(dat_model     = dat_sp,
+                                                          model_type    = "ZI Gaussian",
+                                                          model_formula = as.formula("relAbd_log ~ intervention + phase + gender + age_centered50 + bmi_centered25")))
+    
+    fallBack_toNonZImodels <- ifelse(is.null(model_list[[1]]) & is.null(model_list[[2]]), TRUE, FALSE)
+    
+    if (!fallBack_toNonZImodels) {
+      
+      if (is.null(model_list[[1]]) | is.null(model_list[[2]])) {
+        null_index <- unname(which(sapply(model_list, function(x) { is.null(x) })))
+        model_list <- model_list[-null_index]
+      }
+      
+      bestModel_index <- unname(which.min(sapply(model_list, function(x) { mean(abs(summary(x)$residuals)) })))
+      model           <- model_list[[bestModel_index]]
+      model_label     <- names(model_list)[bestModel_index]
+      tab             <- summary(model)$tTable
+      colnames(tab)   <- c("Estimate", "Std. Error", "DF", "t-value", "Pr(>|t|)") # make names consistent to gam tab names
+    }
+    
+  } else {
+    fallBack_toNonZImodels <- FALSE # simply to have this object defined also if ZI models are not estimated
+  }
+  
+  if (!estimate_ZImodels || fallBack_toNonZImodels) { # estimate models without zero-inflation
+    
+    model_list <- list("Gaussian"     = estimate_model(dat_model     = dat_sp,
+                                                       model_type    = "Gaussian",
+                                                       model_formula = as.formula("relAbd ~ intervention + phase + gender + age_centered50 + bmi_centered25 + s(participant_id, bs = 're')")),
+                       "log-Gaussian" = estimate_model(dat_model     = dat_sp,
+                                                       model_type    = "Gaussian",
+                                                       model_formula = as.formula("relAbd_log ~ intervention + phase + gender + age_centered50 + bmi_centered25 + s(participant_id, bs = 're')")))
+    
+    bestModel_index <- unname(which.max(sapply(model_list, function(x) { summary(x)$dev.expl })))
+    model           <- model_list[[bestModel_index]]
+    model_label     <- names(model_list)[bestModel_index]
+    tab             <- summary(model)$p.table
+    
+  }
+  
+  
+  # 2) interaction model estimation, only for the final selected model
+  # model estimation with the lower category of the interaction variable as the reference category
+  model_intList <- estimate_interactionModels(dat_model      = dat_sp,
+                                              selected_model = model_label)
+  # model estimation with the higher category of the interaction variable as the reference category
+  dat_sp_changedRef         <- dat_sp
+  dat_sp_changedRef$gender  <- relevel(dat_sp_changedRef$gender,  ref = "W")
+  dat_sp_changedRef$age_cat <- relevel(dat_sp_changedRef$age_cat, ref = "50-69")
+  dat_sp_changedRef$bmi_cat <- relevel(dat_sp_changedRef$bmi_cat, ref = "[25, 31]")
+  model_intList_changedRef  <- estimate_interactionModels(dat_model      = dat_sp_changedRef,
+                                                          selected_model = model_label)
+  
+  # create joint table
+  tab_intEffects <- data.frame(effect_type    = c("fresh intervention", "pasteurized intervention"),
+                               effect_ageLow  = c(model_intList$tab_ageInt["interventionFresh", "Estimate"],
+                                                  model_intList$tab_ageInt["interventionPasteurized", "Estimate"]),
+                               effect_ageHigh = c(model_intList_changedRef$tab_ageInt["interventionFresh", "Estimate"],
+                                                  model_intList_changedRef$tab_ageInt["interventionPasteurized", "Estimate"]),
+                               se_ageLow      = c(model_intList$tab_ageInt["interventionFresh", "Std. Error"],
+                                                  model_intList$tab_ageInt["interventionPasteurized", "Std. Error"]),
+                               se_ageHigh     = c(model_intList_changedRef$tab_ageInt["interventionFresh", "Std. Error"],
+                                                  model_intList_changedRef$tab_ageInt["interventionPasteurized", "Std. Error"]),
+                               pvalue_ageLow  = c(model_intList$tab_ageInt["interventionFresh", "Pr(>|t|)"],
+                                                  model_intList$tab_ageInt["interventionPasteurized", "Pr(>|t|)"]),
+                               pvalue_ageHigh = c(model_intList_changedRef$tab_ageInt["interventionFresh", "Pr(>|t|)"],
+                                                  model_intList_changedRef$tab_ageInt["interventionPasteurized", "Pr(>|t|)"]),
+                               effect_sexM    = c(model_intList$tab_sexInt["interventionFresh", "Estimate"],
+                                                  model_intList$tab_sexInt["interventionPasteurized", "Estimate"]),
+                               effect_sexW    = c(model_intList_changedRef$tab_sexInt["interventionFresh", "Estimate"],
+                                                  model_intList_changedRef$tab_sexInt["interventionPasteurized", "Estimate"]),
+                               se_sexM        = c(model_intList$tab_sexInt["interventionFresh", "Std. Error"],
+                                                  model_intList$tab_sexInt["interventionPasteurized", "Std. Error"]),
+                               se_sexW        = c(model_intList_changedRef$tab_sexInt["interventionFresh", "Std. Error"],
+                                                  model_intList_changedRef$tab_sexInt["interventionPasteurized", "Std. Error"]),
+                               pvalue_sexM    = c(model_intList$tab_sexInt["interventionFresh", "Pr(>|t|)"],
+                                                  model_intList$tab_sexInt["interventionPasteurized", "Pr(>|t|)"]),
+                               pvalue_sexW    = c(model_intList_changedRef$tab_sexInt["interventionFresh", "Pr(>|t|)"],
+                                                  model_intList_changedRef$tab_sexInt["interventionPasteurized", "Pr(>|t|)"]),
+                               effect_bmiLow  = c(model_intList$tab_bmiInt["interventionFresh", "Estimate"],
+                                                  model_intList$tab_bmiInt["interventionPasteurized", "Estimate"]),
+                               effect_bmiHigh = c(model_intList_changedRef$tab_bmiInt["interventionFresh", "Estimate"],
+                                                  model_intList_changedRef$tab_bmiInt["interventionPasteurized", "Estimate"]),
+                               se_bmiLow      = c(model_intList$tab_bmiInt["interventionFresh", "Std. Error"],
+                                                  model_intList$tab_bmiInt["interventionPasteurized", "Std. Error"]),
+                               se_bmiHigh     = c(model_intList_changedRef$tab_bmiInt["interventionFresh", "Std. Error"],
+                                                  model_intList_changedRef$tab_bmiInt["interventionPasteurized", "Std. Error"]),
+                               pvalue_bmiLow  = c(model_intList$tab_bmiInt["interventionFresh", "Pr(>|t|)"],
+                                                  model_intList$tab_bmiInt["interventionPasteurized", "Pr(>|t|)"]),
+                               pvalue_bmiHigh = c(model_intList_changedRef$tab_bmiInt["interventionFresh", "Pr(>|t|)"],
+                                                  model_intList_changedRef$tab_bmiInt["interventionPasteurized", "Pr(>|t|)"]))
+  
+  
+  # 3) gather results
+  data.frame(species                 = sp,
+             relFreq_zeroRelAbd      = sum(dat_sp$relAbd == 0) / nrow(dat_sp),
+             relFreq_min0.01relAbd   = sum(dat_sp$relAbd >= 0.01) / nrow(dat_sp),
+             min_relAbd              = min(dat_sp$relAbd),
+             mean_relAbd             = mean(dat_sp$relAbd),
+             median_relAbd           = median(dat_sp$relAbd),
+             max_relAbd              = max(dat_sp$relAbd),
+             baseline_medianRelAbd   = median(dat_sp$relAbd[dat_sp$inter_treat %in% c("Baseline.Fresh","Baseline.Pasteurized")]),
+             baseline_prevalence     = unname(prop.table(table(dat_sp$relAbd[dat_sp$inter_treat %in% c("Baseline.Fresh","Baseline.Pasteurized")] > 0.01))["TRUE"]),
+             postFresh_medianRelAbd  = median(dat_sp$relAbd[dat_sp$inter_treat == "After.Fresh"]),
+             postFresh_prevalence    = unname(prop.table(table(dat_sp$relAbd[dat_sp$inter_treat == "After.Fresh"] > 0.01))["TRUE"]),
+             postPast_medianRelAbd   = median(dat_sp$relAbd[dat_sp$inter_treat == "After.Pasteurized"]),
+             postPast_prevalence     = unname(prop.table(table(dat_sp$relAbd[dat_sp$inter_treat == "After.Pasteurized"] > 0.01))["TRUE"]),
+             model                   = model_label,
+             model_deviance          = ifelse(!grepl("ZI", model_label), summary(model)$dev.expl, NA),
+             model_meanAbsResid      = ifelse(grepl("ZI", model_label), mean(abs(summary(model)$residuals)), NA),
+             freshInt_effect         = tab["interventionFresh", "Estimate"],
+             freshInt_se             = tab["interventionFresh", "Std. Error"],
+             freshInt_pvalue         = tab["interventionFresh", "Pr(>|t|)"],
+             pastInt_effect          = tab["interventionPasteurized", "Estimate"],
+             pastInt_se              = tab["interventionPasteurized", "Std. Error"],
+             pastInt_pvalue          = tab["interventionPasteurized", "Pr(>|t|)"],
+             phaseEffect             = tab["phasephase 2", "Estimate"],
+             genderEffect            = tab["genderW", "Estimate"],
+             ageEffect               = tab["age_centered50", "Estimate"],
+             bmiEffect               = tab["bmi_centered25", "Estimate"],
+             freshInt_ageLow_effect  = tab_intEffects$effect_ageLow[tab_intEffects$effect_type == "fresh intervention"],
+             freshInt_ageHigh_effect = tab_intEffects$effect_ageHigh[tab_intEffects$effect_type == "fresh intervention"],
+             freshInt_ageLow_se      = tab_intEffects$se_ageLow[tab_intEffects$effect_type == "fresh intervention"],
+             freshInt_ageHigh_se     = tab_intEffects$se_ageHigh[tab_intEffects$effect_type == "fresh intervention"],
+             freshInt_ageLow_pvalue  = tab_intEffects$pvalue_ageLow[tab_intEffects$effect_type == "fresh intervention"],
+             freshInt_ageHigh_pvalue = tab_intEffects$pvalue_ageHigh[tab_intEffects$effect_type == "fresh intervention"],
+             freshInt_sexM_effect    = tab_intEffects$effect_sexM[tab_intEffects$effect_type == "fresh intervention"],
+             freshInt_sexW_effect    = tab_intEffects$effect_sexW[tab_intEffects$effect_type == "fresh intervention"],
+             freshInt_sexM_se        = tab_intEffects$se_sexM[tab_intEffects$effect_type == "fresh intervention"],
+             freshInt_sexW_se        = tab_intEffects$se_sexW[tab_intEffects$effect_type == "fresh intervention"],
+             freshInt_sexM_pvalue    = tab_intEffects$pvalue_sexM[tab_intEffects$effect_type == "fresh intervention"],
+             freshInt_sexW_pvalue    = tab_intEffects$pvalue_sexW[tab_intEffects$effect_type == "fresh intervention"],
+             freshInt_bmiLow_effect  = tab_intEffects$effect_bmiLow[tab_intEffects$effect_type == "fresh intervention"],
+             freshInt_bmiHigh_effect = tab_intEffects$effect_bmiHigh[tab_intEffects$effect_type == "fresh intervention"],
+             freshInt_bmiLow_se      = tab_intEffects$se_bmiLow[tab_intEffects$effect_type == "fresh intervention"],
+             freshInt_bmiHigh_se     = tab_intEffects$se_bmiHigh[tab_intEffects$effect_type == "fresh intervention"],
+             freshInt_bmiLow_pvalue  = tab_intEffects$pvalue_bmiLow[tab_intEffects$effect_type == "fresh intervention"],
+             freshInt_bmiHigh_pvalue = tab_intEffects$pvalue_bmiHigh[tab_intEffects$effect_type == "fresh intervention"],
+             pastInt_ageLow_effect   = tab_intEffects$effect_ageLow[tab_intEffects$effect_type == "pasteurized intervention"],
+             pastInt_ageHigh_effect  = tab_intEffects$effect_ageHigh[tab_intEffects$effect_type == "pasteurized intervention"],
+             pastInt_ageLow_se       = tab_intEffects$se_ageLow[tab_intEffects$effect_type == "pasteurized intervention"],
+             pastInt_ageHigh_se      = tab_intEffects$se_ageHigh[tab_intEffects$effect_type == "pasteurized intervention"],
+             pastInt_ageLow_pvalue   = tab_intEffects$pvalue_ageLow[tab_intEffects$effect_type == "pasteurized intervention"],
+             pastInt_ageHigh_pvalue  = tab_intEffects$pvalue_ageHigh[tab_intEffects$effect_type == "pasteurized intervention"],
+             pastInt_sexM_effect     = tab_intEffects$effect_sexM[tab_intEffects$effect_type == "pasteurized intervention"],
+             pastInt_sexW_effect     = tab_intEffects$effect_sexW[tab_intEffects$effect_type == "pasteurized intervention"],
+             pastInt_sexM_se         = tab_intEffects$se_sexM[tab_intEffects$effect_type == "pasteurized intervention"],
+             pastInt_sexW_se         = tab_intEffects$se_sexW[tab_intEffects$effect_type == "pasteurized intervention"],
+             pastInt_sexM_pvalue     = tab_intEffects$pvalue_sexM[tab_intEffects$effect_type == "pasteurized intervention"],
+             pastInt_sexW_pvalue     = tab_intEffects$pvalue_sexW[tab_intEffects$effect_type == "pasteurized intervention"],
+             pastInt_bmiLow_effect   = tab_intEffects$effect_bmiLow[tab_intEffects$effect_type == "pasteurized intervention"],
+             pastInt_bmiHigh_effect  = tab_intEffects$effect_bmiHigh[tab_intEffects$effect_type == "pasteurized intervention"],
+             pastInt_bmiLow_se       = tab_intEffects$se_bmiLow[tab_intEffects$effect_type == "pasteurized intervention"],
+             pastInt_bmiHigh_se      = tab_intEffects$se_bmiHigh[tab_intEffects$effect_type == "pasteurized intervention"],
+             pastInt_bmiLow_pvalue   = tab_intEffects$pvalue_bmiLow[tab_intEffects$effect_type == "pasteurized intervention"],
+             pastInt_bmiHigh_pvalue  = tab_intEffects$pvalue_bmiHigh[tab_intEffects$effect_type == "pasteurized intervention"])
+}
+```
+
+```{r}
+#| message: false
+
+# code for running the screening. It takes about 1.5 minutes on 15 cores
+# to estimate the results. Instead of newly estimating them each time
+# the html is generated, the results were saved after running the screening
+# once, and are now just read from the results csv
+dat_results <- read.csv("8_species_regressionScreening_results.csv")
+
+# species <- dat %>% pull(FeatureID) %>% unique() %>% as.character()
+# 
+# # number of cores to use for the parallelized call
+# n_cores <- 15
+# 
+# # create a cluster object for Windows parallelization
+# cl <- makeCluster(n_cores)
+# 
+# # export necessary functions / data objects to the cluster workers
+# clusterExport(cl, c("runScreening_oneSpecies", "estimate_model", "estimate_interactionModels",
+#                     "species", "dat", "gam", "lme.zig", "summary.gam"))
+# 
+# # run the screening (parallelized call)
+# datList_results <- parLapply(cl, species, runScreening_oneSpecies)
+# 
+# # stop the Windows cluster
+# stopCluster(cl)
+# 
+# # merge results datasets
+# dat_results <- datList_results %>% dplyr::bind_rows()
+# 
+# # perform multiple testing correction and round values in the data
+# p_corrected <- p.adjust(c(dat_results$freshInt_pvalue, dat_results$pastInt_pvalue), method = "BH")
+# pAgeInt_corrected <- p.adjust(c(dat_results$freshInt_ageLow_pvalue,  dat_results$pastInt_ageLow_pvalue,
+#                                 dat_results$freshInt_ageHigh_pvalue, dat_results$pastInt_ageHigh_pvalue), method = "BH")
+# pSexInt_corrected <- p.adjust(c(dat_results$freshInt_sexM_pvalue,  dat_results$pastInt_sexM_pvalue,
+#                                 dat_results$freshInt_sexW_pvalue, dat_results$pastInt_sexW_pvalue), method = "BH")
+# pBMIInt_corrected <- p.adjust(c(dat_results$freshInt_bmiLow_pvalue,  dat_results$pastInt_bmiLow_pvalue,
+#                                 dat_results$freshInt_bmiHigh_pvalue, dat_results$pastInt_bmiHigh_pvalue), method = "BH")
+# n           <- nrow(dat_results)
+# dat_results <- dat_results %>%
+#   mutate(freshInt_pvalue_correct          = p_corrected[1:n],
+#          pastInt_pvalue_correct           = p_corrected[(n+1):(2*n)],
+#          freshInt_ageLow_pvalue_correct   = pAgeInt_corrected[1:n],
+#          pastInt_ageLow_pvalue_correct    = pAgeInt_corrected[(n+1):(2*n)],
+#          freshInt_ageHigh_pvalue_correct  = pAgeInt_corrected[(2*n+1):(3*n)],
+#          pastInt_ageHigh_pvalue_correct   = pAgeInt_corrected[(3*n+1):(4*n)],
+#          freshInt_sexM_pvalue_correct     = pSexInt_corrected[1:n],
+#          pastInt_sexM_pvalue_correct      = pSexInt_corrected[(n+1):(2*n)],
+#          freshInt_sexW_pvalue_correct     = pSexInt_corrected[(2*n+1):(3*n)],
+#          pastInt_sexW_pvalue_correct      = pSexInt_corrected[(3*n+1):(4*n)],
+#          freshInt_bmiLow_pvalue_correct   = pBMIInt_corrected[1:n],
+#          pastInt_bmiLow_pvalue_correct    = pBMIInt_corrected[(n+1):(2*n)],
+#          freshInt_bmiHigh_pvalue_correct  = pBMIInt_corrected[(2*n+1):(3*n)],
+#          pastInt_bmiHigh_pvalue_correct   = pBMIInt_corrected[(3*n+1):(4*n)]) %>%
+#   mutate_at(c(2:13, 15:ncol(.)), function(x) { round(x, 4) })
+# 
+# write.csv(dat_results, file = "8_species_regressionScreening_results.csv", row.names = FALSE)
+```
+
+
+## Results
+
+##### Overview of the numbers of significant genes
+
+```{r}
+data.frame("what"  = c("No. of species with relevant abundance",
+                       "No. of significant species (fresh intervention)",
+                       "No. of significant species (past. intervention)"),
+           "value" = c(nrow(dat_results),
+                       sum(dat_results$freshInt_pvalue_correct < 0.1, na.rm = TRUE),
+                       sum(dat_results$pastInt_pvalue_correct < 0.1, na.rm = TRUE))) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+
+##### Overview which specific species are significant
+
+```{r}
+#| column: page
+
+dat_results %>% 
+  filter((freshInt_pvalue_correct < 0.1) |
+           (pastInt_pvalue_correct < 0.1)) %>% 
+  dplyr::select(-ends_with("pvalue")) %>% 
+  mutate(across(contains("pvalue"), function(x) { ifelse(x < 0.1, x, "not significant") })) %>% 
+  dplyr::select(species, contains("pvalue")) %>% 
+  arrange(freshInt_pvalue_correct, pastInt_pvalue_correct) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+
+... alternatively, looking at the p-values before correction for multiple testing:
+
+```{r}
+data.frame("what"  = c("No. of species with relevant abundance",
+                       "No. of significant species (fresh intervention)",
+                       "No. of significant species (past. intervention)"),
+           "value" = c(nrow(dat_results),
+                       sum(dat_results$freshInt_pvalue < 0.1, na.rm = TRUE),
+                       sum(dat_results$pastInt_pvalue < 0.1, na.rm = TRUE))) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+```{r}
+#| column: page
+
+dat_results %>% 
+  filter((freshInt_pvalue < 0.1) |
+           (pastInt_pvalue < 0.1)) %>% 
+  mutate(across(ends_with("pvalue"), function(x) { ifelse(x < 0.1, x, "not significant") })) %>% 
+  dplyr::select(species, ends_with("pvalue")) %>% 
+  arrange(freshInt_pvalue, pastInt_pvalue) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+
+##### Figures for publication
+
+Inspiration for adding the phylogenetic tree: https://stackoverflow.com/questions/52281227/adding-a-ggtree-object-to-already-existing-ggplot-with-shared-y-axis
+
+```{r}
+#| column: page
+#| fig-height: 2
+#| fig-width: 12
+
+# prepare the base dataset for the plot
+dat_signif <- dat_results %>% 
+  filter((freshInt_pvalue_correct < 0.1) | (pastInt_pvalue_correct < 0.1))
+dat_plot <- data.frame(species       = rep(dat_signif$species,  times = 2),
+                       baseline_medianRelAbd  = rep(dat_signif$baseline_medianRelAbd,  times = 2),
+                       baseline_prevalence    = rep(dat_signif$baseline_prevalence,    times = 2),
+                       postFresh_medianRelAbd = rep(dat_signif$postFresh_medianRelAbd, times = 2),
+                       postFresh_prevalence   = rep(dat_signif$postFresh_prevalence,   times = 2),
+                       postPast_medianRelAbd  = rep(dat_signif$postPast_medianRelAbd,  times = 2),
+                       postPast_prevalence    = rep(dat_signif$postPast_prevalence,    times = 2),
+                       model         = rep(dat_signif$model, times = 2),
+                       intervention  = rep(c("Fresh intervention", "Pasteurized intervention"), each = nrow(dat_signif)),
+                       effect        = c(dat_signif$freshInt_effect, dat_signif$pastInt_effect),
+                       qvalue        = c(dat_signif$freshInt_pvalue_correct, dat_signif$pastInt_pvalue_correct),
+                       pastEffect_forSorting = rep(dat_signif$pastInt_effect, times = 2)) %>% 
+  mutate(species       = gsub(pattern = "species:", replacement = "", x = species)) %>% 
+  dplyr::left_join(dat %>% select(species, phylum) %>% distinct(species, .keep_all = TRUE), by = "species") %>% 
+  arrange(desc(pastEffect_forSorting)) %>% 
+  mutate(pvalue_signif = case_when((qvalue < 0.1) & grepl("Fresh", intervention) & (effect > 0) ~ "significant pos. effect (fresh intervention)",
+                                   (qvalue < 0.1) & grepl("Fresh", intervention) & (effect < 0) ~ "significant neg. effect (fresh intervention)",
+                                   (qvalue < 0.1) & (effect > 0) ~ "significant pos. effect (pasteurized intervention)",
+                                   (qvalue < 0.1) & (effect < 0) ~ "significant neg. effect (pasteurized intervention)",
+                                   TRUE          ~ "not significant"),
+         species       = gsub(pattern = "_", replacement = " ", x = species),
+         effect_label  = case_when((model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 1)        ~ paste0("+", round(effect, 0), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.1)      ~ paste0("+", round(effect, 1), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.01)     ~ paste0("+", round(effect, 2), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.001)    ~ paste0("+", round(effect, 3), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.0001)   ~ paste0("+", round(effect, 4), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0)        ~ "+ <0.0001 PP",
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -1)       ~ paste0(round(effect, 0), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -0.1)     ~ paste0(round(effect, 1), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -0.01)    ~ paste0(round(effect, 2), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -0.001)   ~ paste0(round(effect, 3), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -0.0001)  ~ paste0(round(effect, 4), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect < 0)                   ~ "- >-0.0001 PP",
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) >= 1)             ~ paste0("+", round((100 * (exp(effect) - 1)), 0), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) >= 0.1)           ~ paste0("+", round((100 * (exp(effect) - 1)), 1), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) >= 0.01)          ~ paste0("+", round((100 * (exp(effect) - 1)), 2), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & (effect >= 0)                                ~ "+ <0.01%",
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) <= -1)            ~ paste0(round((100 * (exp(effect) - 1)), 0), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) <= -0.1)          ~ paste0(round((100 * (exp(effect) - 1)), 1), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) <= -0.01)         ~ paste0(round((100 * (exp(effect) - 1)), 2), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & (effect < 0)                                 ~ "- >-0.01%"))
+
+# artificially add the median rel. abd.'s and the prevalences as separate 'interventions' and 'effect_labels' to be able to nicely plot it
+dat_plot_list <- lapply(as.character(unique(dat_plot$species)), function(spec) {
+  dat_spec <- dat_plot %>% filter(species == spec)
+  dat_spec %>% 
+    dplyr::bind_rows(data.frame(species       = spec,
+                                intervention  = "Baseline median rel. abd.\n(prevalence)",
+                                phylum        = dat_spec$phylum[1],
+                                pvalue_signif = "",
+                                effect_label_relAbd = case_when(dat_spec$baseline_medianRelAbd[1] < .0001 ~ "<0.0001%",
+                                                                dat_spec$baseline_medianRelAbd[1] < .01   ~ paste0(round(dat_spec$baseline_medianRelAbd[1], 4), "%"),
+                                                                dat_spec$baseline_medianRelAbd[1] < .1    ~ paste0(round(dat_spec$baseline_medianRelAbd[1], 3), "%"),
+                                                                dat_spec$baseline_medianRelAbd[1] < 1     ~ paste0(round(dat_spec$baseline_medianRelAbd[1], 2), "%"),
+                                                                dat_spec$baseline_medianRelAbd[1] < 10    ~ paste0(round(dat_spec$baseline_medianRelAbd[1], 1), "%"),
+                                                                TRUE ~ paste0(round(dat_spec$baseline_medianRelAbd[1], 0), "%")),
+                                effect_label_prevalence = case_when(dat_spec$baseline_prevalence[1] < 0.01 ~ paste0(round(100 * dat_spec$baseline_prevalence[1], 1), "%"),
+                                                                    TRUE                                   ~ paste0(round(100 * dat_spec$baseline_prevalence[1], 0), "%"))) %>% 
+                       mutate(effect_label = paste0(effect_label_relAbd, "\n(", effect_label_prevalence, ")"))) %>% 
+    dplyr::bind_rows(data.frame(species       = spec,
+                                intervention  = "After fresh median rel. abd.\n(prevalence)",
+                                phylum        = dat_spec$phylum[1],
+                                pvalue_signif = "",
+                                effect_label_relAbd = case_when(dat_spec$postFresh_medianRelAbd[1] < .0001 ~ "<0.0001%",
+                                                                dat_spec$postFresh_medianRelAbd[1] < .01   ~ paste0(round(dat_spec$postFresh_medianRelAbd[1], 4), "%"),
+                                                                dat_spec$postFresh_medianRelAbd[1] < .1    ~ paste0(round(dat_spec$postFresh_medianRelAbd[1], 3), "%"),
+                                                                dat_spec$postFresh_medianRelAbd[1] < 1     ~ paste0(round(dat_spec$postFresh_medianRelAbd[1], 2), "%"),
+                                                                dat_spec$postFresh_medianRelAbd[1] < 10    ~ paste0(round(dat_spec$postFresh_medianRelAbd[1], 1), "%"),
+                                                                TRUE ~ paste0(round(dat_spec$postFresh_medianRelAbd[1], 0), "%")),
+                                effect_label_prevalence = case_when(dat_spec$postFresh_prevalence[1] < 0.01 ~ paste0(round(100 * dat_spec$postFresh_prevalence[1], 1), "%"),
+                                                                    TRUE                                    ~ paste0(round(100 * dat_spec$postFresh_prevalence[1], 0), "%"))) %>%
+                       mutate(effect_label = paste0(effect_label_relAbd, "\n(", effect_label_prevalence, ")"))) %>%
+    dplyr::bind_rows(data.frame(species       = spec,
+                                intervention  = "After past. median rel. abd.\n(prevalence)",
+                                phylum        = dat_spec$phylum[1],
+                                pvalue_signif = "",
+                                effect_label_relAbd = case_when(dat_spec$postPast_medianRelAbd[1] < .0001 ~ "<0.0001%",
+                                                                dat_spec$postPast_medianRelAbd[1] < .01   ~ paste0(round(dat_spec$postPast_medianRelAbd[1], 4), "%"),
+                                                                dat_spec$postPast_medianRelAbd[1] < .1    ~ paste0(round(dat_spec$postPast_medianRelAbd[1], 3), "%"),
+                                                                dat_spec$postPast_medianRelAbd[1] < 1     ~ paste0(round(dat_spec$postPast_medianRelAbd[1], 2), "%"),
+                                                                dat_spec$postPast_medianRelAbd[1] < 10    ~ paste0(round(dat_spec$postPast_medianRelAbd[1], 1), "%"),
+                                                                TRUE ~ paste0(round(dat_spec$postPast_medianRelAbd[1], 0), "%")),
+                                effect_label_prevalence = case_when(dat_spec$postPast_prevalence[1] < 0.01 ~ paste0(round(100 * dat_spec$postPast_prevalence[1], 1), "%"),
+                                                                    TRUE                                   ~ paste0(round(100 * dat_spec$postPast_prevalence[1], 0), "%"))) %>%
+                       mutate(effect_label = paste0(effect_label_relAbd, "\n(", effect_label_prevalence, ")")))
+})
+dat_plot_overall <- dat_plot_list %>% dplyr::bind_rows() %>% 
+  mutate(species      = factor(species, levels = rev(unique(species))),
+         intervention = factor(intervention, levels = c("Baseline median rel. abd.\n(prevalence)",
+                                                        "After fresh median rel. abd.\n(prevalence)",
+                                                        "After past. median rel. abd.\n(prevalence)",
+                                                        "Fresh intervention", "Pasteurized intervention")),
+         text_size    = case_when(grepl("intervention", intervention) ~ 4,
+                                  TRUE                                ~ 3),
+         pvalue_signif = factor(pvalue_signif, levels = c("not significant",
+                                                          "significant pos. effect (fresh intervention)",
+                                                          "significant neg. effect (fresh intervention)",
+                                                          "significant pos. effect (pasteurized intervention)",
+                                                          "significant neg. effect (pasteurized intervention)",
+                                                          "")))
+
+# plot
+gg_qvalues <- dat_plot_overall %>% 
+  ggplot(aes(x = intervention, y = species)) +
+  geom_tile(aes(fill = pvalue_signif)) +
+  geom_text(aes(label = effect_label, size = text_size)) +
+  scale_fill_manual("q-value", values = c("not significant" = "gray95",
+                                          "significant pos. effect (fresh intervention)" = "#7cbde9",
+                                          "significant neg. effect (fresh intervention)" = "#1F78B4",
+                                          "significant pos. effect (pasteurized intervention)" = "#ffb366",
+                                          "significant neg. effect (pasteurized intervention)" = "#FF7F00"),
+                    na.value = "white", drop = FALSE) +
+  scale_size(range = c(3, 4), guide = "none") +
+  facet_grid(rows = vars(phylum), scales = "free", space = "free") +
+  ggtitle("Intervention effects on species") +
+  theme(axis.title = element_blank(),
+        panel.grid = element_blank(),
+        strip.background = element_rect(fill = "gray97", color = "gray97"))
+gg_qvalues
+# ggsave("functional_speciesScreening_qvalues.png", width = 14, height = 3)
+```
+
+
+```{r}
+#| column: page
+#| fig-height: 12
+#| fig-width: 12
+
+# prepare the base dataset for the plot
+dat_signif <- dat_results %>% 
+  filter((freshInt_pvalue < 0.05) | (pastInt_pvalue < 0.05))
+dat_plot <- data.frame(species       = rep(dat_signif$species,  times = 2),
+                       baseline_medianRelAbd = rep(dat_signif$baseline_medianRelAbd, times = 2),
+                       model         = rep(dat_signif$model, times = 2),
+                       intervention  = rep(c("Fresh intervention", "Pasteurized intervention"), each = nrow(dat_signif)),
+                       effect        = c(dat_signif$freshInt_effect, dat_signif$pastInt_effect),
+                       pvalue        = c(dat_signif$freshInt_pvalue, dat_signif$pastInt_pvalue),
+                       pastEffect_forSorting = rep(dat_signif$pastInt_effect, times = 2)) %>% 
+  mutate(species       = gsub(pattern = "species:", replacement = "", x = species)) %>% 
+  dplyr::left_join(dat %>% select(species, phylum) %>% distinct(species, .keep_all = TRUE), by = "species") %>% 
+  arrange(desc(pastEffect_forSorting)) %>% 
+  mutate(pvalue_signif = case_when((pvalue < 0.05) & grepl("Fresh", intervention) & (effect > 0) ~ "significant pos. effect (fresh intervention)",
+                                   (pvalue < 0.05) & grepl("Fresh", intervention) & (effect < 0) ~ "significant neg. effect (fresh intervention)",
+                                   (pvalue < 0.05) & (effect > 0) ~ "significant pos. effect (pasteurized intervention)",
+                                   (pvalue < 0.05) & (effect < 0) ~ "significant neg. effect (pasteurized intervention)",
+                                   TRUE          ~ "not significant"),
+         species       = gsub(pattern = "_", replacement = " ", x = species),
+         effect_label  = case_when((model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 1)        ~ paste0("+", round(effect, 0), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.1)      ~ paste0("+", round(effect, 1), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.01)     ~ paste0("+", round(effect, 2), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.001)    ~ paste0("+", round(effect, 3), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.0001)   ~ paste0("+", round(effect, 4), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0)        ~ "+ <0.0001 PP",
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -1)       ~ paste0(round(effect, 0), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -0.1)     ~ paste0(round(effect, 1), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -0.01)    ~ paste0(round(effect, 2), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -0.001)   ~ paste0(round(effect, 3), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -0.0001)  ~ paste0(round(effect, 4), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect < 0)                   ~ "- >-0.0001 PP",
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) >= 1)             ~ paste0("+", round((100 * (exp(effect) - 1)), 0), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) >= 0.1)           ~ paste0("+", round((100 * (exp(effect) - 1)), 1), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) >= 0.01)          ~ paste0("+", round((100 * (exp(effect) - 1)), 2), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & (effect >= 0)                                ~ "+ <0.01%",
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) <= -1)            ~ paste0(round((100 * (exp(effect) - 1)), 0), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) <= -0.1)          ~ paste0(round((100 * (exp(effect) - 1)), 1), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) <= -0.01)         ~ paste0(round((100 * (exp(effect) - 1)), 2), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & (effect < 0)                                 ~ "- >-0.01%"))
+
+# artificially add the baseline rel. abd. as an 'intervention' and 'effect_label' to be able to nicely plot it
+dat_plot_list <- lapply(as.character(unique(dat_plot$species)), function(spec) {
+  dat_spec <- dat_plot %>% filter(species == spec)
+  dat_spec %>% 
+    dplyr::bind_rows(data.frame(species       = spec,
+                                intervention  = "Baseline median rel. abd.",
+                                phylum        = dat_spec$phylum[1],
+                                pvalue_signif = "",
+                                effect_label  = case_when(dat_spec$baseline_medianRelAbd < .0001 ~ "<0.0001%",
+                                                          dat_spec$baseline_medianRelAbd < .001  ~ paste0(round(dat_spec$baseline_medianRelAbd, 4), "%"),
+                                                          dat_spec$baseline_medianRelAbd < .01   ~ paste0(round(dat_spec$baseline_medianRelAbd, 3), "%"),
+                                                          dat_spec$baseline_medianRelAbd < .1    ~ paste0(round(dat_spec$baseline_medianRelAbd, 2), "%"),
+                                                          dat_spec$baseline_medianRelAbd < 1     ~ paste0(round(dat_spec$baseline_medianRelAbd, 1), "%"),
+                                                          TRUE ~ paste0(round(dat_spec$baseline_medianRelAbd, 0), "%"))))
+})
+dat_plot <- dat_plot_list %>% dplyr::bind_rows() %>% 
+  mutate(species      = factor(species, levels = rev(unique(species))),
+         intervention = factor(intervention, levels = c("Baseline median rel. abd.", "Fresh intervention", "Pasteurized intervention")),
+         pvalue_signif  = factor(pvalue_signif, levels = c("not significant",
+                                                           "significant pos. effect (fresh intervention)",
+                                                           "significant neg. effect (fresh intervention)",
+                                                           "significant pos. effect (pasteurized intervention)",
+                                                           "significant neg. effect (pasteurized intervention)",
+                                                           "")),
+         text_highlight = case_when(grepl("Baseline", intervention) & (effect_label == "<0.0001%") ~ "no",
+                                    pvalue_signif == "not significant" ~ "no",
+                                    TRUE ~ "yes"))
+
+
+# create tree plot
+tse_filtered <- tse[rowData(tse)$species %in% gsub(dat_plot$species, pattern = " ", replacement = "_"),]
+gg_tree <- mia::taxonomyTree(tse_filtered) %>% ggtree()
+
+# # color-code the tree
+# dat_treeColors <- data.frame(node = c(49, 60, 66),
+#                              type = c("A", "B", "C"))
+# gg_tree <- gg_tree +
+#   geom_hilight(data  = dat_treeColors, aes(node = node, fill = type),
+#                type  = "roundrect",
+#                alpha = 0.2) +
+#   theme(legend.position = "none")
+
+# make sure the main heatmap has the same ordering as the tree
+gg_tree_build    <- ggplot_build(gg_tree + geom_tiplab()) # add tiplab to retrieve species labels
+species_ordering <- gg_tree_build$data[[3]] %>% arrange(desc(y)) %>% pull(label)
+species_ordering <- species_ordering %>%
+  gsub(pattern = "species:", replacement = "") %>%
+  gsub(pattern = "_",        replacement = " ")
+dat_plot         <- dat_plot %>%
+  mutate(species = factor(species, levels = rev(species_ordering)))
+
+# plot
+gg_heatmap <- dat_plot %>% 
+  ggplot(aes(x = intervention, y = species)) +
+  geom_tile(aes(fill = pvalue_signif)) +
+  geom_text(aes(label = effect_label, col = text_highlight)) +
+  scale_fill_manual("uncorrected p-value", values = c("not significant" = "gray95",
+                                                      "significant pos. effect (fresh intervention)" = "#7cbde9",
+                                                      "significant neg. effect (fresh intervention)" = "#1F78B4",
+                                                      "significant pos. effect (pasteurized intervention)" = "#ffb366",
+                                                      "significant neg. effect (pasteurized intervention)" = "#FF7F00"),
+                    na.value = "white") +
+  scale_color_manual(values = c("gray80", "black"), guide = "none") +
+  ggtitle("Intervention effects on species") +
+  theme(axis.title = element_blank(),
+        panel.grid = element_blank())
+
+# align the two plots
+gg_pvalues <- (gg_tree + gg_heatmap) + patchwork::plot_layout(widths = c(0.2, 0.8))
+gg_pvalues
+# ggsave("FigureS11_speciesScreening_pvalues.png", width = 12, height = 12)
+```
+
+
+
+# Results for interaction effects
+
+##### Overview of the numbers of significant genes
+
+```{r}
+data.frame("what"  = c("No. of species with relevant abundance",
+                       "No. of significant species (fresh intervention - age low)",
+                       "No. of significant species (fresh intervention - age high)",
+                       "No. of significant species (past. intervention - age low)",
+                       "No. of significant species (past. intervention - age high)",
+                       "No. of significant species (fresh intervention - gender male)",
+                       "No. of significant species (fresh intervention - gender female)",
+                       "No. of significant species (past. intervention - gender male)",
+                       "No. of significant species (past. intervention - gender female)",
+                       "No. of significant species (fresh intervention - BMI low)",
+                       "No. of significant species (fresh intervention - BMI high)",
+                       "No. of significant species (past. intervention - BMI low)",
+                       "No. of significant species (past. intervention - BMI high)"),
+           "value" = c(nrow(dat_results),
+                       sum(dat_results$freshInt_ageLow_pvalue_correct < 0.1, na.rm = TRUE),
+                       sum(dat_results$freshInt_ageHigh_pvalue_correct < 0.1, na.rm = TRUE),
+                       sum(dat_results$pastInt_ageLow_pvalue_correct < 0.1, na.rm = TRUE),
+                       sum(dat_results$pastInt_ageHigh_pvalue_correct < 0.1, na.rm = TRUE),
+                       sum(dat_results$freshInt_sexM_pvalue_correct < 0.1, na.rm = TRUE),
+                       sum(dat_results$freshInt_sexW_pvalue_correct < 0.1, na.rm = TRUE),
+                       sum(dat_results$pastInt_sexM_pvalue_correct < 0.1, na.rm = TRUE),
+                       sum(dat_results$pastInt_sexW_pvalue_correct < 0.1, na.rm = TRUE),
+                       sum(dat_results$freshInt_bmiLow_pvalue_correct < 0.1, na.rm = TRUE),
+                       sum(dat_results$freshInt_bmiHigh_pvalue_correct < 0.1, na.rm = TRUE),
+                       sum(dat_results$pastInt_bmiLow_pvalue_correct < 0.1, na.rm = TRUE),
+                       sum(dat_results$pastInt_bmiHigh_pvalue_correct < 0.1, na.rm = TRUE))) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+
+##### ... alternatively, the numbers of significant genes based on uncorrected p-values
+
+```{r}
+data.frame("what"  = c("No. of species with relevant abundance",
+                       "No. of significant species (fresh intervention - age low)",
+                       "No. of significant species (fresh intervention - age high)",
+                       "No. of significant species (past. intervention - age low)",
+                       "No. of significant species (past. intervention - age high)",
+                       "No. of significant species (fresh intervention - gender male)",
+                       "No. of significant species (fresh intervention - gender female)",
+                       "No. of significant species (past. intervention - gender male)",
+                       "No. of significant species (past. intervention - gender female)",
+                       "No. of significant species (fresh intervention - BMI low)",
+                       "No. of significant species (fresh intervention - BMI high)",
+                       "No. of significant species (past. intervention - BMI low)",
+                       "No. of significant species (past. intervention - BMI high)"),
+           "value" = c(nrow(dat_results),
+                       sum(dat_results$freshInt_ageLow_pvalue < 0.05, na.rm = TRUE),
+                       sum(dat_results$freshInt_ageHigh_pvalue < 0.05, na.rm = TRUE),
+                       sum(dat_results$pastInt_ageLow_pvalue < 0.05, na.rm = TRUE),
+                       sum(dat_results$pastInt_ageHigh_pvalue < 0.05, na.rm = TRUE),
+                       sum(dat_results$freshInt_sexM_pvalue < 0.05, na.rm = TRUE),
+                       sum(dat_results$freshInt_sexW_pvalue < 0.05, na.rm = TRUE),
+                       sum(dat_results$pastInt_sexM_pvalue < 0.05, na.rm = TRUE),
+                       sum(dat_results$pastInt_sexW_pvalue < 0.05, na.rm = TRUE),
+                       sum(dat_results$freshInt_bmiLow_pvalue < 0.05, na.rm = TRUE),
+                       sum(dat_results$freshInt_bmiHigh_pvalue < 0.05, na.rm = TRUE),
+                       sum(dat_results$pastInt_bmiLow_pvalue < 0.05, na.rm = TRUE),
+                       sum(dat_results$pastInt_bmiHigh_pvalue < 0.05, na.rm = TRUE))) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+
+
+## Age
+
+##### Figures for publication
+
+```{r}
+#| column: page
+#| fig-height: 6
+#| fig-width: 12
+
+# prepare the base dataset for the plot
+dat_signif <- dat_results %>% 
+  filter((freshInt_ageLow_pvalue_correct < 0.1) | (freshInt_ageHigh_pvalue_correct < 0.1) |
+           (pastInt_ageLow_pvalue_correct < 0.1) | (pastInt_ageHigh_pvalue_correct < 0.1))
+dat_plot <- data.frame(species       = rep(dat_signif$species,  times = 4),
+                       baseline_medianRelAbd = rep(dat_signif$baseline_medianRelAbd, times = 4),
+                       model         = rep(dat_signif$model, times = 4),
+                       intervention  = rep(c("Fresh intervention\n(age low)", "Fresh intervention\n(age high)",
+                                             "Pasteurized intervention\n(age low)", "Pasteurized intervention\n(age high)"), each = nrow(dat_signif)),
+                       effect        = c(dat_signif$freshInt_ageLow_effect, dat_signif$freshInt_ageHigh_effect,
+                                         dat_signif$pastInt_ageLow_effect,  dat_signif$pastInt_ageHigh_effect),
+                       qvalue        = c(dat_signif$freshInt_ageLow_pvalue_correct, dat_signif$freshInt_ageHigh_pvalue_correct,
+                                         dat_signif$pastInt_ageLow_pvalue_correct,  dat_signif$pastInt_ageHigh_pvalue_correct),
+                       pastEffect_forSorting = rep(dat_signif$pastInt_ageLow_effect, times = 4)) %>% 
+  mutate(species       = gsub(pattern = "species:", replacement = "", x = species)) %>% 
+  dplyr::left_join(dat %>% select(species, phylum) %>% distinct(species, .keep_all = TRUE), by = "species") %>% 
+  arrange(desc(pastEffect_forSorting)) %>% 
+  mutate(pvalue_signif = case_when((qvalue < 0.1) & grepl("Fresh", intervention) & (effect > 0) ~ "significant pos. effect (fresh intervention)",
+                                   (qvalue < 0.1) & grepl("Fresh", intervention) & (effect < 0) ~ "significant neg. effect (fresh intervention)",
+                                   (qvalue < 0.1) & (effect > 0) ~ "significant pos. effect (pasteurized intervention)",
+                                   (qvalue < 0.1) & (effect < 0) ~ "significant neg. effect (pasteurized intervention)",
+                                   TRUE          ~ "not significant"),
+         species       = gsub(pattern = "_", replacement = " ", x = species),
+         effect_label  = case_when((model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 1)        ~ paste0("+", round(effect, 0), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.1)      ~ paste0("+", round(effect, 1), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.01)     ~ paste0("+", round(effect, 2), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.001)    ~ paste0("+", round(effect, 3), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.0001)   ~ paste0("+", round(effect, 4), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0)        ~ "+ <0.0001 PP",
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -1)       ~ paste0(round(effect, 0), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -0.1)     ~ paste0(round(effect, 1), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -0.01)    ~ paste0(round(effect, 2), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -0.001)   ~ paste0(round(effect, 3), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -0.0001)  ~ paste0(round(effect, 4), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect < 0)                   ~ "- >-0.0001 PP",
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) >= 1)             ~ paste0("+", round((100 * (exp(effect) - 1)), 0), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) >= 0.1)           ~ paste0("+", round((100 * (exp(effect) - 1)), 1), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) >= 0.01)          ~ paste0("+", round((100 * (exp(effect) - 1)), 2), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & (effect >= 0)                                ~ "+ <0.01%",
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) <= -1)            ~ paste0(round((100 * (exp(effect) - 1)), 0), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) <= -0.1)          ~ paste0(round((100 * (exp(effect) - 1)), 1), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) <= -0.01)         ~ paste0(round((100 * (exp(effect) - 1)), 2), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & (effect < 0)                                 ~ "- >-0.01%"))
+
+# artificially add the baseline rel. abd. as an 'intervention' and 'effect_label' to be able to nicely plot it
+dat_plot_list <- lapply(as.character(unique(dat_plot$species)), function(spec) {
+  dat_spec <- dat_plot %>% filter(species == spec)
+  dat_spec %>% 
+    dplyr::bind_rows(data.frame(species       = spec,
+                                intervention  = "Baseline median rel. abd.",
+                                phylum        = dat_spec$phylum[1],
+                                pvalue_signif = "",
+                                effect_label  = case_when(dat_spec$baseline_medianRelAbd < .0001 ~ "<0.0001%",
+                                                          dat_spec$baseline_medianRelAbd < .001  ~ paste0(round(dat_spec$baseline_medianRelAbd, 4), "%"),
+                                                          dat_spec$baseline_medianRelAbd < .01   ~ paste0(round(dat_spec$baseline_medianRelAbd, 3), "%"),
+                                                          dat_spec$baseline_medianRelAbd < .1    ~ paste0(round(dat_spec$baseline_medianRelAbd, 2), "%"),
+                                                          dat_spec$baseline_medianRelAbd < 1     ~ paste0(round(dat_spec$baseline_medianRelAbd, 1), "%"),
+                                                          TRUE ~ paste0(round(dat_spec$baseline_medianRelAbd, 0), "%"))))
+})
+dat_plot_ageInt <- dat_plot_list %>% dplyr::bind_rows() %>% 
+  mutate(species      = factor(species, levels = rev(unique(species))),
+         intervention = factor(intervention, levels = c("Baseline median rel. abd.", "Fresh intervention\n(age low)", "Fresh intervention\n(age high)",
+                                                        "Pasteurized intervention\n(age low)", "Pasteurized intervention\n(age high)")),
+         pvalue_signif = factor(pvalue_signif, levels = c("not significant",
+                                                          "significant pos. effect (fresh intervention)",
+                                                          "significant neg. effect (fresh intervention)",
+                                                          "significant pos. effect (pasteurized intervention)",
+                                                          "significant neg. effect (pasteurized intervention)",
+                                                          "")))
+
+# plot
+gg_ageInt_qvalue <- dat_plot_ageInt %>% 
+  ggplot(aes(x = intervention, y = species)) +
+  geom_tile(aes(fill = pvalue_signif)) +
+  geom_text(aes(label = effect_label)) +
+  scale_fill_manual("q-value", values = c("not significant" = "gray95",
+                                          "significant pos. effect (fresh intervention)" = "#7cbde9",
+                                          "significant neg. effect (fresh intervention)" = "#1F78B4",
+                                          "significant pos. effect (pasteurized intervention)" = "#ffb366",
+                                          "significant neg. effect (pasteurized intervention)" = "#FF7F00"),
+                    na.value = "white", drop = FALSE) +
+  facet_grid(rows = vars(phylum), scales = "free", space = "free") +
+  ggtitle("Intervention effects on species") +
+  theme(axis.title = element_blank(),
+        panel.grid = element_blank(),
+        strip.background = element_rect(fill = "gray97", color = "gray97"))
+gg_ageInt_qvalue
+# ggsave("functional_speciesScreening_ageInteractions_qvalues.png", width = 12, height = 4)
+```
+
+
+```{r}
+#| column: page
+#| fig-height: 20
+#| fig-width: 16
+
+# prepare the base dataset for the plot
+dat_signif <- dat_results %>% 
+  filter((freshInt_ageLow_pvalue < 0.05) | (freshInt_ageHigh_pvalue < 0.05) |
+           (pastInt_ageLow_pvalue < 0.05) | (pastInt_ageHigh_pvalue < 0.05))
+dat_plot <- data.frame(species       = rep(dat_signif$species,  times = 4),
+                       baseline_medianRelAbd = rep(dat_signif$baseline_medianRelAbd, times = 4),
+                       model         = rep(dat_signif$model, times = 4),
+                       intervention  = rep(c("Fresh intervention\n(age low)", "Fresh intervention\n(age high)",
+                                             "Pasteurized intervention\n(age low)", "Pasteurized intervention\n(age high)"), each = nrow(dat_signif)),
+                       effect        = c(dat_signif$freshInt_ageLow_effect, dat_signif$freshInt_ageHigh_effect,
+                                         dat_signif$pastInt_ageLow_effect,  dat_signif$pastInt_ageHigh_effect),
+                       pvalue        = c(dat_signif$freshInt_ageLow_pvalue, dat_signif$freshInt_ageHigh_pvalue,
+                                         dat_signif$pastInt_ageLow_pvalue,  dat_signif$pastInt_ageHigh_pvalue),
+                       pastEffect_forSorting = rep(dat_signif$pastInt_ageLow_effect, times = 4)) %>% 
+  mutate(species       = gsub(pattern = "species:", replacement = "", x = species)) %>% 
+  dplyr::left_join(dat %>% select(species, phylum) %>% distinct(species, .keep_all = TRUE), by = "species") %>% 
+  arrange(desc(pastEffect_forSorting)) %>% 
+  mutate(pvalue_signif = case_when((pvalue < 0.05) & grepl("Fresh", intervention) & (effect > 0) ~ "significant pos. effect (fresh intervention)",
+                                   (pvalue < 0.05) & grepl("Fresh", intervention) & (effect < 0) ~ "significant neg. effect (fresh intervention)",
+                                   (pvalue < 0.05) & (effect > 0) ~ "significant pos. effect (pasteurized intervention)",
+                                   (pvalue < 0.05) & (effect < 0) ~ "significant neg. effect (pasteurized intervention)",
+                                   TRUE          ~ "not significant"),
+         species       = gsub(pattern = "_", replacement = " ", x = species),
+         effect_label  = case_when((model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 1)        ~ paste0("+", round(effect, 0), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.1)      ~ paste0("+", round(effect, 1), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.01)     ~ paste0("+", round(effect, 2), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.001)    ~ paste0("+", round(effect, 3), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.0001)   ~ paste0("+", round(effect, 4), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0)        ~ "+ <0.0001 PP",
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -1)       ~ paste0(round(effect, 0), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -0.1)     ~ paste0(round(effect, 1), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -0.01)    ~ paste0(round(effect, 2), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -0.001)   ~ paste0(round(effect, 3), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -0.0001)  ~ paste0(round(effect, 4), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect < 0)                   ~ "- >-0.0001 PP",
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) >= 1)             ~ paste0("+", round((100 * (exp(effect) - 1)), 0), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) >= 0.1)           ~ paste0("+", round((100 * (exp(effect) - 1)), 1), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) >= 0.01)          ~ paste0("+", round((100 * (exp(effect) - 1)), 2), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & (effect >= 0)                                ~ "+ <0.01%",
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) <= -1)            ~ paste0(round((100 * (exp(effect) - 1)), 0), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) <= -0.1)          ~ paste0(round((100 * (exp(effect) - 1)), 1), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) <= -0.01)         ~ paste0(round((100 * (exp(effect) - 1)), 2), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & (effect < 0)                                 ~ "- >-0.01%"))
+
+# artificially add the baseline rel. abd. as an 'intervention' and 'effect_label' to be able to nicely plot it
+dat_plot_list <- lapply(as.character(unique(dat_plot$species)), function(spec) {
+  dat_spec <- dat_plot %>% filter(species == spec)
+  dat_spec %>% 
+    dplyr::bind_rows(data.frame(species       = spec,
+                                intervention  = "Baseline median rel. abd.",
+                                phylum        = dat_spec$phylum[1],
+                                pvalue_signif = "",
+                                effect_label  = case_when(dat_spec$baseline_medianRelAbd < .0001 ~ "<0.0001%",
+                                                          dat_spec$baseline_medianRelAbd < .001  ~ paste0(round(dat_spec$baseline_medianRelAbd, 4), "%"),
+                                                          dat_spec$baseline_medianRelAbd < .01   ~ paste0(round(dat_spec$baseline_medianRelAbd, 3), "%"),
+                                                          dat_spec$baseline_medianRelAbd < .1    ~ paste0(round(dat_spec$baseline_medianRelAbd, 2), "%"),
+                                                          dat_spec$baseline_medianRelAbd < 1     ~ paste0(round(dat_spec$baseline_medianRelAbd, 1), "%"),
+                                                          TRUE ~ paste0(round(dat_spec$baseline_medianRelAbd, 0), "%"))))
+})
+dat_plot <- dat_plot_list %>% dplyr::bind_rows() %>% 
+  mutate(species      = factor(species, levels = rev(unique(species))),
+         intervention = gsub(intervention, pattern = "age low",  replacement = "age 21-49"),
+         intervention = gsub(intervention, pattern = "age high", replacement = "age 50-69"),
+         intervention = factor(intervention, levels = c("Baseline median rel. abd.",
+                                                        "Fresh intervention\n(age 21-49)",
+                                                        "Fresh intervention\n(age 50-69)",
+                                                        "Pasteurized intervention\n(age 21-49)",
+                                                        "Pasteurized intervention\n(age 50-69)")),
+         text_highlight = case_when(grepl("Baseline", intervention) & (effect_label == "<0.0001%") ~ "no",
+                                    pvalue_signif == "not significant" ~ "no",
+                                    TRUE ~ "yes"),
+         pvalue_signif  = factor(pvalue_signif, levels = c("not significant",
+                                                           "significant pos. effect (fresh intervention)",
+                                                           "significant neg. effect (fresh intervention)",
+                                                           "significant pos. effect (pasteurized intervention)",
+                                                           "significant neg. effect (pasteurized intervention)",
+                                                           "")))
+
+
+# create tree plot
+tse_filtered <- tse[rowData(tse)$species %in% gsub(dat_plot$species, pattern = " ", replacement = "_"),]
+gg_tree <- mia::taxonomyTree(tse_filtered) %>% ggtree()
+
+# make sure the main heatmap has the same ordering as the tree
+gg_tree_build    <- ggplot_build(gg_tree + geom_tiplab()) # add tiplab to retrieve species labels
+species_ordering <- gg_tree_build$data[[3]] %>% arrange(desc(y)) %>% pull(label)
+species_ordering <- species_ordering %>% 
+  gsub(pattern = "species:", replacement = "") %>% 
+  gsub(pattern = "_",        replacement = " ")
+dat_plot         <- dat_plot %>%
+  mutate(species = factor(species, levels = rev(species_ordering)))
+
+# plot
+gg_heatmap <- dat_plot %>% 
+  ggplot(aes(x = intervention, y = species)) +
+  geom_tile(aes(fill = pvalue_signif)) +
+  geom_text(aes(label = effect_label, col = text_highlight)) +
+  scale_fill_manual("uncorrected p-value", values = c("not significant" = "gray95",
+                                                      "significant pos. effect (fresh intervention)" = "#7cbde9",
+                                                      "significant neg. effect (fresh intervention)" = "#1F78B4",
+                                                      "significant pos. effect (pasteurized intervention)" = "#ffb366",
+                                                      "significant neg. effect (pasteurized intervention)" = "#FF7F00"),
+                    na.value = "white") +
+  scale_color_manual(values = c("gray80", "black"), guide = "none") +
+  ggtitle("Intervention effects on species") +
+  theme(axis.title = element_blank(),
+        panel.grid = element_blank())
+
+# align the two plots
+(gg_tree + gg_heatmap) + patchwork::plot_layout(widths = c(0.2, 0.8))
+
+# ggsave("FigureS12_speciesScreening_ageStrat_pvalues.png", width = 16, height = 20)
+```
+
+
+
+## Gender
+
+##### Figures for publication
+
+```{r}
+#| column: page
+#| fig-height: 2
+#| fig-width: 12
+
+# prepare the base dataset for the plot
+dat_signif <- dat_results %>% 
+  filter((freshInt_sexM_pvalue_correct < 0.1) | (freshInt_sexW_pvalue_correct < 0.1) |
+           (pastInt_sexM_pvalue_correct < 0.1) | (pastInt_sexW_pvalue_correct < 0.1))
+dat_plot <- data.frame(species       = rep(dat_signif$species,  times = 4),
+                       baseline_medianRelAbd = rep(dat_signif$baseline_medianRelAbd, times = 4),
+                       model         = rep(dat_signif$model, times = 4),
+                       intervention  = rep(c("Fresh intervention\n(gender male)", "Fresh intervention\n(gender female)",
+                                             "Pasteurized intervention\n(gender male)", "Pasteurized intervention\n(gender female)"), each = nrow(dat_signif)),
+                       effect        = c(dat_signif$freshInt_sexM_effect, dat_signif$freshInt_sexW_effect,
+                                         dat_signif$pastInt_sexM_effect,  dat_signif$pastInt_sexW_effect),
+                       qvalue        = c(dat_signif$freshInt_sexM_pvalue_correct, dat_signif$freshInt_sexW_pvalue_correct,
+                                         dat_signif$pastInt_sexM_pvalue_correct,  dat_signif$pastInt_sexW_pvalue_correct),
+                       pastEffect_forSorting = rep(dat_signif$pastInt_sexM_effect, times = 4)) %>% 
+  mutate(species       = gsub(pattern = "species:", replacement = "", x = species)) %>% 
+  dplyr::left_join(dat %>% select(species, phylum) %>% distinct(species, .keep_all = TRUE), by = "species") %>% 
+  arrange(desc(pastEffect_forSorting)) %>% 
+  mutate(pvalue_signif = case_when((qvalue < 0.1) & grepl("Fresh", intervention) & (effect > 0) ~ "significant pos. effect (fresh intervention)",
+                                   (qvalue < 0.1) & grepl("Fresh", intervention) & (effect < 0) ~ "significant neg. effect (fresh intervention)",
+                                   (qvalue < 0.1) & (effect > 0) ~ "significant pos. effect (pasteurized intervention)",
+                                   (qvalue < 0.1) & (effect < 0) ~ "significant neg. effect (pasteurized intervention)",
+                                   TRUE          ~ "not significant"),
+         species       = gsub(pattern = "_", replacement = " ", x = species),
+         effect_label  = case_when((model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 1)        ~ paste0("+", round(effect, 0), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.1)      ~ paste0("+", round(effect, 1), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.01)     ~ paste0("+", round(effect, 2), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.001)    ~ paste0("+", round(effect, 3), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.0001)   ~ paste0("+", round(effect, 4), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0)        ~ "+ <0.0001 PP",
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -1)       ~ paste0(round(effect, 0), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -0.1)     ~ paste0(round(effect, 1), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -0.01)    ~ paste0(round(effect, 2), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -0.001)   ~ paste0(round(effect, 3), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -0.0001)  ~ paste0(round(effect, 4), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect < 0)                   ~ "- >-0.0001 PP",
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) >= 1)             ~ paste0("+", round((100 * (exp(effect) - 1)), 0), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) >= 0.1)           ~ paste0("+", round((100 * (exp(effect) - 1)), 1), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) >= 0.01)          ~ paste0("+", round((100 * (exp(effect) - 1)), 2), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & (effect >= 0)                                ~ "+ <0.01%",
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) <= -1)            ~ paste0(round((100 * (exp(effect) - 1)), 0), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) <= -0.1)          ~ paste0(round((100 * (exp(effect) - 1)), 1), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) <= -0.01)         ~ paste0(round((100 * (exp(effect) - 1)), 2), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & (effect < 0)                                 ~ "- >-0.01%"))
+
+# artificially add the baseline rel. abd. as an 'intervention' and 'effect_label' to be able to nicely plot it
+dat_plot_list <- lapply(as.character(unique(dat_plot$species)), function(spec) {
+  dat_spec <- dat_plot %>% filter(species == spec)
+  dat_spec %>% 
+    dplyr::bind_rows(data.frame(species       = spec,
+                                intervention  = "Baseline median rel. abd.",
+                                phylum        = dat_spec$phylum[1],
+                                pvalue_signif = "",
+                                effect_label  = case_when(dat_spec$baseline_medianRelAbd < .0001 ~ "<0.0001%",
+                                                          dat_spec$baseline_medianRelAbd < .001  ~ paste0(round(dat_spec$baseline_medianRelAbd, 4), "%"),
+                                                          dat_spec$baseline_medianRelAbd < .01   ~ paste0(round(dat_spec$baseline_medianRelAbd, 3), "%"),
+                                                          dat_spec$baseline_medianRelAbd < .1    ~ paste0(round(dat_spec$baseline_medianRelAbd, 2), "%"),
+                                                          dat_spec$baseline_medianRelAbd < 1     ~ paste0(round(dat_spec$baseline_medianRelAbd, 1), "%"),
+                                                          TRUE ~ paste0(round(dat_spec$baseline_medianRelAbd, 0), "%"))))
+})
+dat_plot_sexInt <- dat_plot_list %>% dplyr::bind_rows() %>% 
+  mutate(species      = factor(species, levels = rev(unique(species))),
+         intervention = factor(intervention, levels = c("Baseline median rel. abd.", "Fresh intervention\n(gender male)", "Fresh intervention\n(gender female)",
+                                                        "Pasteurized intervention\n(gender male)", "Pasteurized intervention\n(gender female)")),
+         pvalue_signif = factor(pvalue_signif, levels = c("not significant",
+                                                          "significant pos. effect (fresh intervention)",
+                                                          "significant neg. effect (fresh intervention)",
+                                                          "significant pos. effect (pasteurized intervention)",
+                                                          "significant neg. effect (pasteurized intervention)",
+                                                          "")))
+
+# plot
+gg_sexInt_qvalue <- dat_plot_sexInt %>% 
+  ggplot(aes(x = intervention, y = species)) +
+  geom_tile(aes(fill = pvalue_signif)) +
+  geom_text(aes(label = effect_label)) +
+  scale_fill_manual("q-value", values = c("not significant" = "gray95",
+                                                      "significant pos. effect (fresh intervention)" = "#7cbde9",
+                                                      "significant neg. effect (fresh intervention)" = "#1F78B4",
+                                                      "significant pos. effect (pasteurized intervention)" = "#ffb366",
+                                                      "significant neg. effect (pasteurized intervention)" = "#FF7F00"),
+                    na.value = "white", drop = FALSE) +
+  facet_grid(rows = vars(phylum), scales = "free", space = "free") +
+  ggtitle("Intervention effects on species") +
+  theme(axis.title = element_blank(),
+        panel.grid = element_blank(),
+        strip.background = element_rect(fill = "gray97", color = "gray97"))
+gg_sexInt_qvalue
+# ggsave("functional_speciesScreening_sexInteractions_qvalues.png", width = 12, height = 1.5)
+```
+
+
+```{r}
+#| column: page
+#| fig-height: 20
+#| fig-width: 16
+
+# prepare the base dataset for the plot
+dat_signif <- dat_results %>% 
+  filter((freshInt_sexM_pvalue < 0.05) | (freshInt_sexW_pvalue < 0.05) |
+           (pastInt_sexM_pvalue < 0.05) | (pastInt_sexW_pvalue < 0.05))
+dat_plot <- data.frame(species       = rep(dat_signif$species,  times = 4),
+                       baseline_medianRelAbd = rep(dat_signif$baseline_medianRelAbd, times = 4),
+                       model         = rep(dat_signif$model, times = 4),
+                       intervention  = rep(c("Fresh intervention\n(gender male)", "Fresh intervention\n(gender female)",
+                                             "Pasteurized intervention\n(gender male)", "Pasteurized intervention\n(gender female)"), each = nrow(dat_signif)),
+                       effect        = c(dat_signif$freshInt_sexM_effect, dat_signif$freshInt_sexW_effect,
+                                         dat_signif$pastInt_sexM_effect,  dat_signif$pastInt_sexW_effect),
+                       pvalue        = c(dat_signif$freshInt_sexM_pvalue, dat_signif$freshInt_sexW_pvalue,
+                                         dat_signif$pastInt_sexM_pvalue,  dat_signif$pastInt_sexW_pvalue),
+                       pastEffect_forSorting = rep(dat_signif$pastInt_sexM_effect, times = 4)) %>% 
+  mutate(species       = gsub(pattern = "species:", replacement = "", x = species)) %>% 
+  dplyr::left_join(dat %>% select(species, phylum) %>% distinct(species, .keep_all = TRUE), by = "species") %>% 
+  arrange(desc(pastEffect_forSorting)) %>% 
+  mutate(pvalue_signif = case_when((pvalue < 0.05) & grepl("Fresh", intervention) & (effect > 0) ~ "significant pos. effect (fresh intervention)",
+                                   (pvalue < 0.05) & grepl("Fresh", intervention) & (effect < 0) ~ "significant neg. effect (fresh intervention)",
+                                   (pvalue < 0.05) & (effect > 0) ~ "significant pos. effect (pasteurized intervention)",
+                                   (pvalue < 0.05) & (effect < 0) ~ "significant neg. effect (pasteurized intervention)",
+                                   TRUE          ~ "not significant"),
+         species       = gsub(pattern = "_", replacement = " ", x = species),
+         effect_label  = case_when((model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 1)        ~ paste0("+", round(effect, 0), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.1)      ~ paste0("+", round(effect, 1), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.01)     ~ paste0("+", round(effect, 2), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.001)    ~ paste0("+", round(effect, 3), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.0001)   ~ paste0("+", round(effect, 4), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0)        ~ "+ <0.0001 PP",
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -1)       ~ paste0(round(effect, 0), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -0.1)     ~ paste0(round(effect, 1), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -0.01)    ~ paste0(round(effect, 2), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -0.001)   ~ paste0(round(effect, 3), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -0.0001)  ~ paste0(round(effect, 4), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect < 0)                   ~ "- >-0.0001 PP",
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) >= 1)             ~ paste0("+", round((100 * (exp(effect) - 1)), 0), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) >= 0.1)           ~ paste0("+", round((100 * (exp(effect) - 1)), 1), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) >= 0.01)          ~ paste0("+", round((100 * (exp(effect) - 1)), 2), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & (effect >= 0)                                ~ "+ <0.01%",
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) <= -1)            ~ paste0(round((100 * (exp(effect) - 1)), 0), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) <= -0.1)          ~ paste0(round((100 * (exp(effect) - 1)), 1), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) <= -0.01)         ~ paste0(round((100 * (exp(effect) - 1)), 2), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & (effect < 0)                                 ~ "- >-0.01%"))
+
+# artificially add the baseline rel. abd. as an 'intervention' and 'effect_label' to be able to nicely plot it
+dat_plot_list <- lapply(as.character(unique(dat_plot$species)), function(spec) {
+  dat_spec <- dat_plot %>% filter(species == spec)
+  dat_spec %>% 
+    dplyr::bind_rows(data.frame(species       = spec,
+                                intervention  = "Baseline median rel. abd.",
+                                phylum        = dat_spec$phylum[1],
+                                pvalue_signif = "",
+                                effect_label  = case_when(dat_spec$baseline_medianRelAbd < .0001 ~ "<0.0001%",
+                                                          dat_spec$baseline_medianRelAbd < .001  ~ paste0(round(dat_spec$baseline_medianRelAbd, 4), "%"),
+                                                          dat_spec$baseline_medianRelAbd < .01   ~ paste0(round(dat_spec$baseline_medianRelAbd, 3), "%"),
+                                                          dat_spec$baseline_medianRelAbd < .1    ~ paste0(round(dat_spec$baseline_medianRelAbd, 2), "%"),
+                                                          dat_spec$baseline_medianRelAbd < 1     ~ paste0(round(dat_spec$baseline_medianRelAbd, 1), "%"),
+                                                          TRUE ~ paste0(round(dat_spec$baseline_medianRelAbd, 0), "%"))))
+})
+dat_plot <- dat_plot_list %>% dplyr::bind_rows() %>% 
+  mutate(species      = factor(species, levels = rev(unique(species))),
+         intervention = gsub(intervention, pattern = "gender ", replacement = ""),
+         intervention = factor(intervention, levels = c("Baseline median rel. abd.",
+                                                        "Fresh intervention\n(male)",
+                                                        "Fresh intervention\n(female)",
+                                                        "Pasteurized intervention\n(male)",
+                                                        "Pasteurized intervention\n(female)")),
+         text_highlight = case_when(grepl("Baseline", intervention) & (effect_label == "<0.0001%") ~ "no",
+                                    pvalue_signif == "not significant" ~ "no",
+                                    TRUE ~ "yes"),
+         pvalue_signif  = factor(pvalue_signif, levels = c("not significant",
+                                                           "significant pos. effect (fresh intervention)",
+                                                           "significant neg. effect (fresh intervention)",
+                                                           "significant pos. effect (pasteurized intervention)",
+                                                           "significant neg. effect (pasteurized intervention)",
+                                                           "")))
+
+
+# create tree plot
+tse_filtered <- tse[rowData(tse)$species %in% gsub(dat_plot$species, pattern = " ", replacement = "_"),]
+gg_tree <- mia::taxonomyTree(tse_filtered) %>% ggtree()
+
+# make sure the main heatmap has the same ordering as the tree
+gg_tree_build    <- ggplot_build(gg_tree + geom_tiplab()) # add tiplab to retrieve species labels
+species_ordering <- gg_tree_build$data[[3]] %>% arrange(desc(y)) %>% pull(label)
+species_ordering <- species_ordering %>% 
+  gsub(pattern = "species:", replacement = "") %>% 
+  gsub(pattern = "_",        replacement = " ")
+dat_plot         <- dat_plot %>%
+  mutate(species = factor(species, levels = rev(species_ordering)))
+
+# plot
+gg_heatmap <- dat_plot %>% 
+  ggplot(aes(x = intervention, y = species)) +
+  geom_tile(aes(fill = pvalue_signif)) +
+  geom_text(aes(label = effect_label, col = text_highlight)) +
+  scale_fill_manual("uncorrected p-value", values = c("not significant" = "gray95",
+                                                      "significant pos. effect (fresh intervention)" = "#7cbde9",
+                                                      "significant neg. effect (fresh intervention)" = "#1F78B4",
+                                                      "significant pos. effect (pasteurized intervention)" = "#ffb366",
+                                                      "significant neg. effect (pasteurized intervention)" = "#FF7F00"),
+                    na.value = "white") +
+  scale_color_manual(values = c("gray80", "black"), guide = "none") +
+  ggtitle("Intervention effects on species") +
+  theme(axis.title = element_blank(),
+        panel.grid = element_blank())
+
+# align the two plots
+(gg_tree + gg_heatmap) + patchwork::plot_layout(widths = c(0.2, 0.8))
+
+# ggsave("FigureS13_speciesScreening_sexStrat_pvalues.png", width = 16, height = 20)
+```
+
+
+## BMI
+
+##### Figures for publication
+
+```{r}
+#| column: page
+#| fig-height: 4
+#| fig-width: 12
+
+# prepare the base dataset for the plot
+dat_signif <- dat_results %>% 
+  filter((freshInt_bmiLow_pvalue_correct < 0.1) | (freshInt_bmiHigh_pvalue_correct < 0.1) |
+           (pastInt_bmiLow_pvalue_correct < 0.1) | (pastInt_bmiHigh_pvalue_correct < 0.1))
+dat_plot <- data.frame(species       = rep(dat_signif$species,  times = 4),
+                       baseline_medianRelAbd = rep(dat_signif$baseline_medianRelAbd, times = 4),
+                       model         = rep(dat_signif$model, times = 4),
+                       intervention  = rep(c("Fresh intervention\n(BMI low)", "Fresh intervention\n(BMI high)",
+                                             "Pasteurized intervention\n(BMI low)", "Pasteurized intervention\n(BMI high)"), each = nrow(dat_signif)),
+                       effect        = c(dat_signif$freshInt_bmiLow_effect, dat_signif$freshInt_bmiHigh_effect,
+                                         dat_signif$pastInt_bmiLow_effect,  dat_signif$pastInt_bmiHigh_effect),
+                       qvalue        = c(dat_signif$freshInt_bmiLow_pvalue_correct, dat_signif$freshInt_bmiHigh_pvalue_correct,
+                                         dat_signif$pastInt_bmiLow_pvalue_correct,  dat_signif$pastInt_bmiHigh_pvalue_correct),
+                       pastEffect_forSorting = rep(dat_signif$pastInt_bmiLow_effect, times = 4)) %>% 
+  mutate(species       = gsub(pattern = "species:", replacement = "", x = species)) %>% 
+  dplyr::left_join(dat %>% select(species, phylum) %>% distinct(species, .keep_all = TRUE), by = "species") %>% 
+  arrange(desc(pastEffect_forSorting)) %>% 
+  mutate(pvalue_signif = case_when((qvalue < 0.1) & grepl("Fresh", intervention) & (effect > 0) ~ "significant pos. effect (fresh intervention)",
+                                   (qvalue < 0.1) & grepl("Fresh", intervention) & (effect < 0) ~ "significant neg. effect (fresh intervention)",
+                                   (qvalue < 0.1) & (effect > 0) ~ "significant pos. effect (pasteurized intervention)",
+                                   (qvalue < 0.1) & (effect < 0) ~ "significant neg. effect (pasteurized intervention)",
+                                   TRUE          ~ "not significant"),
+         species       = gsub(pattern = "_", replacement = " ", x = species),
+         effect_label  = case_when((model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 1)        ~ paste0("+", round(effect, 0), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.1)      ~ paste0("+", round(effect, 1), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.01)     ~ paste0("+", round(effect, 2), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.001)    ~ paste0("+", round(effect, 3), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.0001)   ~ paste0("+", round(effect, 4), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0)        ~ "+ <0.0001 PP",
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -1)       ~ paste0(round(effect, 0), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -0.1)     ~ paste0(round(effect, 1), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -0.01)    ~ paste0(round(effect, 2), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -0.001)   ~ paste0(round(effect, 3), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -0.0001)  ~ paste0(round(effect, 4), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect < 0)                   ~ "- >-0.0001 PP",
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) >= 1)             ~ paste0("+", round((100 * (exp(effect) - 1)), 0), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) >= 0.1)           ~ paste0("+", round((100 * (exp(effect) - 1)), 1), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) >= 0.01)          ~ paste0("+", round((100 * (exp(effect) - 1)), 2), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & (effect >= 0)                                ~ "+ <0.01%",
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) <= -1)            ~ paste0(round((100 * (exp(effect) - 1)), 0), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) <= -0.1)          ~ paste0(round((100 * (exp(effect) - 1)), 1), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) <= -0.01)         ~ paste0(round((100 * (exp(effect) - 1)), 2), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & (effect < 0)                                 ~ "- >-0.01%"))
+
+# artificially add the baseline rel. abd. as an 'intervention' and 'effect_label' to be able to nicely plot it
+dat_plot_list <- lapply(as.character(unique(dat_plot$species)), function(spec) {
+  dat_spec <- dat_plot %>% filter(species == spec)
+  dat_spec %>% 
+    dplyr::bind_rows(data.frame(species       = spec,
+                                intervention  = "Baseline median rel. abd.",
+                                phylum        = dat_spec$phylum[1],
+                                pvalue_signif = "",
+                                effect_label  = case_when(dat_spec$baseline_medianRelAbd < .0001 ~ "<0.0001%",
+                                                          dat_spec$baseline_medianRelAbd < .001  ~ paste0(round(dat_spec$baseline_medianRelAbd, 4), "%"),
+                                                          dat_spec$baseline_medianRelAbd < .01   ~ paste0(round(dat_spec$baseline_medianRelAbd, 3), "%"),
+                                                          dat_spec$baseline_medianRelAbd < .1    ~ paste0(round(dat_spec$baseline_medianRelAbd, 2), "%"),
+                                                          dat_spec$baseline_medianRelAbd < 1     ~ paste0(round(dat_spec$baseline_medianRelAbd, 1), "%"),
+                                                          TRUE ~ paste0(round(dat_spec$baseline_medianRelAbd, 0), "%"))))
+})
+dat_plot_bmiInt <- dat_plot_list %>% dplyr::bind_rows() %>% 
+  mutate(species      = factor(species, levels = rev(unique(species))),
+         intervention = factor(intervention, levels = c("Baseline median rel. abd.", "Fresh intervention\n(BMI low)", "Fresh intervention\n(BMI high)",
+                                                        "Pasteurized intervention\n(BMI low)", "Pasteurized intervention\n(BMI high)")),
+         pvalue_signif = factor(pvalue_signif, levels = c("not significant",
+                                                          "significant pos. effect (fresh intervention)",
+                                                          "significant neg. effect (fresh intervention)",
+                                                          "significant pos. effect (pasteurized intervention)",
+                                                          "significant neg. effect (pasteurized intervention)",
+                                                          "")))
+
+# plot
+gg_bmiInt_qvalue <- dat_plot_bmiInt %>% 
+  ggplot(aes(x = intervention, y = species)) +
+  geom_tile(aes(fill = pvalue_signif)) +
+  geom_text(aes(label = effect_label)) +
+  scale_fill_manual("q-value", values = c("not significant" = "gray95",
+                                          "significant pos. effect (fresh intervention)" = "#7cbde9",
+                                          "significant neg. effect (fresh intervention)" = "#1F78B4",
+                                          "significant pos. effect (pasteurized intervention)" = "#ffb366",
+                                          "significant neg. effect (pasteurized intervention)" = "#FF7F00"),
+                    na.value = "white", drop = FALSE) +
+  facet_grid(rows = vars(phylum), scales = "free", space = "free") +
+  ggtitle("Intervention effects on species") +
+  theme(axis.title = element_blank(),
+        panel.grid = element_blank(),
+        strip.background = element_rect(fill = "gray97", color = "gray97"))
+gg_bmiInt_qvalue
+# ggsave("functional_speciesScreening_bmiInteractions_qvalues.png", width = 12, height = 3)
+```
+
+
+```{r}
+#| column: page
+#| fig-height: 20
+#| fig-width: 16
+
+# prepare the base dataset for the plot
+dat_signif <- dat_results %>% 
+  filter((freshInt_bmiLow_pvalue < 0.05) | (freshInt_bmiHigh_pvalue < 0.05) |
+           (pastInt_bmiLow_pvalue < 0.05) | (pastInt_bmiHigh_pvalue < 0.05))
+dat_plot <- data.frame(species       = rep(dat_signif$species,  times = 4),
+                       baseline_medianRelAbd = rep(dat_signif$baseline_medianRelAbd, times = 4),
+                       model         = rep(dat_signif$model, times = 4),
+                       intervention  = rep(c("Fresh intervention\n(BMI low)", "Fresh intervention\n(BMI high)",
+                                             "Pasteurized intervention\n(BMI low)", "Pasteurized intervention\n(BMI high)"), each = nrow(dat_signif)),
+                       effect        = c(dat_signif$freshInt_bmiLow_effect, dat_signif$freshInt_bmiHigh_effect,
+                                         dat_signif$pastInt_bmiLow_effect,  dat_signif$pastInt_bmiHigh_effect),
+                       pvalue        = c(dat_signif$freshInt_bmiLow_pvalue, dat_signif$freshInt_bmiHigh_pvalue,
+                                         dat_signif$pastInt_bmiLow_pvalue,  dat_signif$pastInt_bmiHigh_pvalue),
+                       pastEffect_forSorting = rep(dat_signif$pastInt_bmiLow_effect, times = 4)) %>% 
+  mutate(species       = gsub(pattern = "species:", replacement = "", x = species)) %>% 
+  dplyr::left_join(dat %>% select(species, phylum) %>% distinct(species, .keep_all = TRUE), by = "species") %>% 
+  arrange(desc(pastEffect_forSorting)) %>% 
+  mutate(pvalue_signif = case_when((pvalue < 0.05) & grepl("Fresh", intervention) & (effect > 0) ~ "significant pos. effect (fresh intervention)",
+                                   (pvalue < 0.05) & grepl("Fresh", intervention) & (effect < 0) ~ "significant neg. effect (fresh intervention)",
+                                   (pvalue < 0.05) & (effect > 0) ~ "significant pos. effect (pasteurized intervention)",
+                                   (pvalue < 0.05) & (effect < 0) ~ "significant neg. effect (pasteurized intervention)",
+                                   TRUE          ~ "not significant"),
+         species       = gsub(pattern = "_", replacement = " ", x = species),
+         effect_label  = case_when((model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 1)        ~ paste0("+", round(effect, 0), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.1)      ~ paste0("+", round(effect, 1), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.01)     ~ paste0("+", round(effect, 2), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.001)    ~ paste0("+", round(effect, 3), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.0001)   ~ paste0("+", round(effect, 4), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0)        ~ "+ <0.0001 PP",
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -1)       ~ paste0(round(effect, 0), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -0.1)     ~ paste0(round(effect, 1), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -0.01)    ~ paste0(round(effect, 2), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -0.001)   ~ paste0(round(effect, 3), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -0.0001)  ~ paste0(round(effect, 4), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect < 0)                   ~ "- >-0.0001 PP",
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) >= 1)             ~ paste0("+", round((100 * (exp(effect) - 1)), 0), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) >= 0.1)           ~ paste0("+", round((100 * (exp(effect) - 1)), 1), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) >= 0.01)          ~ paste0("+", round((100 * (exp(effect) - 1)), 2), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & (effect >= 0)                                ~ "+ <0.01%",
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) <= -1)            ~ paste0(round((100 * (exp(effect) - 1)), 0), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) <= -0.1)          ~ paste0(round((100 * (exp(effect) - 1)), 1), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) <= -0.01)         ~ paste0(round((100 * (exp(effect) - 1)), 2), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & (effect < 0)                                 ~ "- >-0.01%"))
+
+# artificially add the baseline rel. abd. as an 'intervention' and 'effect_label' to be able to nicely plot it
+dat_plot_list <- lapply(as.character(unique(dat_plot$species)), function(spec) {
+  dat_spec <- dat_plot %>% filter(species == spec)
+  dat_spec %>% 
+    dplyr::bind_rows(data.frame(species       = spec,
+                                intervention  = "Baseline median rel. abd.",
+                                phylum        = dat_spec$phylum[1],
+                                pvalue_signif = "",
+                                effect_label  = case_when(dat_spec$baseline_medianRelAbd < .0001 ~ "<0.0001%",
+                                                          dat_spec$baseline_medianRelAbd < .001  ~ paste0(round(dat_spec$baseline_medianRelAbd, 4), "%"),
+                                                          dat_spec$baseline_medianRelAbd < .01   ~ paste0(round(dat_spec$baseline_medianRelAbd, 3), "%"),
+                                                          dat_spec$baseline_medianRelAbd < .1    ~ paste0(round(dat_spec$baseline_medianRelAbd, 2), "%"),
+                                                          dat_spec$baseline_medianRelAbd < 1     ~ paste0(round(dat_spec$baseline_medianRelAbd, 1), "%"),
+                                                          TRUE ~ paste0(round(dat_spec$baseline_medianRelAbd, 0), "%"))))
+})
+dat_plot <- dat_plot_list %>% dplyr::bind_rows() %>% 
+  mutate(species      = factor(species, levels = rev(unique(species))),
+         intervention = gsub(intervention, pattern = "low",  replacement = "[18, 25)"),
+         intervention = gsub(intervention, pattern = "high", replacement = "[25, 31]"),
+         intervention = factor(intervention, levels = c("Baseline median rel. abd.",
+                                                        "Fresh intervention\n(BMI [18, 25))",
+                                                        "Fresh intervention\n(BMI [25, 31])",
+                                                        "Pasteurized intervention\n(BMI [18, 25))",
+                                                        "Pasteurized intervention\n(BMI [25, 31])")),
+         text_highlight = case_when(grepl("Baseline", intervention) & (effect_label == "<0.0001%") ~ "no",
+                                    pvalue_signif == "not significant" ~ "no",
+                                    TRUE ~ "yes"),
+         pvalue_signif  = factor(pvalue_signif, levels = c("not significant",
+                                                           "significant pos. effect (fresh intervention)",
+                                                           "significant neg. effect (fresh intervention)",
+                                                           "significant pos. effect (pasteurized intervention)",
+                                                           "significant neg. effect (pasteurized intervention)",
+                                                           "")))
+
+
+# create tree plot
+tse_filtered <- tse[rowData(tse)$species %in% gsub(dat_plot$species, pattern = " ", replacement = "_"),]
+gg_tree <- mia::taxonomyTree(tse_filtered) %>% ggtree()
+
+# make sure the main heatmap has the same ordering as the tree
+gg_tree_build    <- ggplot_build(gg_tree + geom_tiplab()) # add tiplab to retrieve species labels
+species_ordering <- gg_tree_build$data[[3]] %>% arrange(desc(y)) %>% pull(label)
+species_ordering <- species_ordering %>% 
+  gsub(pattern = "species:", replacement = "") %>% 
+  gsub(pattern = "_",        replacement = " ")
+dat_plot         <- dat_plot %>%
+  mutate(species = factor(species, levels = rev(species_ordering)))
+
+# plot
+gg_heatmap <- dat_plot %>% 
+  ggplot(aes(x = intervention, y = species)) +
+  geom_tile(aes(fill = pvalue_signif)) +
+  geom_text(aes(label = effect_label, col = text_highlight)) +
+  scale_fill_manual("uncorrected p-value", values = c("not significant" = "gray95",
+                                                      "significant pos. effect (fresh intervention)" = "#7cbde9",
+                                                      "significant neg. effect (fresh intervention)" = "#1F78B4",
+                                                      "significant pos. effect (pasteurized intervention)" = "#ffb366",
+                                                      "significant neg. effect (pasteurized intervention)" = "#FF7F00"),
+                    na.value = "white") +
+  scale_color_manual(values = c("gray80", "black"), guide = "none") +
+  ggtitle("Intervention effects on species") +
+  theme(axis.title = element_blank(),
+        panel.grid = element_blank())
+
+# align the two plots
+(gg_tree + gg_heatmap) + patchwork::plot_layout(widths = c(0.2, 0.8))
+
+# ggsave("FigureS14_speciesScreening_bmiStrat_pvalues.png", width = 16, height = 20)
+```
+
+
+## Joint heatmap of all interaction effects
+
+... of uncorrected p-values
+
+##### Create the age interaction data
+
+... same as for the above plot, but also including species that showed significances in sex or BMI interactions
+
+```{r}
+# prepare the base dataset for the plot
+dat_signif <- dat_results %>% 
+  filter((freshInt_ageLow_pvalue < 0.05) | (freshInt_ageHigh_pvalue < 0.05) |
+           (pastInt_ageLow_pvalue < 0.05) | (pastInt_ageHigh_pvalue < 0.05) |
+           (freshInt_sexM_pvalue < 0.05) | (freshInt_sexW_pvalue < 0.05) |
+           (pastInt_sexM_pvalue < 0.05) | (pastInt_sexW_pvalue < 0.05) |
+           (freshInt_bmiLow_pvalue < 0.05) | (freshInt_bmiHigh_pvalue < 0.05) |
+           (pastInt_bmiLow_pvalue < 0.05) | (pastInt_bmiHigh_pvalue < 0.05))
+dat_plot <- data.frame(species       = rep(dat_signif$species,  times = 4),
+                       baseline_medianRelAbd = rep(dat_signif$baseline_medianRelAbd, times = 4),
+                       model         = rep(dat_signif$model, times = 4),
+                       intervention  = rep(c("Fresh intervention\n(age low)", "Fresh intervention\n(age high)",
+                                             "Pasteurized intervention\n(age low)", "Pasteurized intervention\n(age high)"), each = nrow(dat_signif)),
+                       effect        = c(dat_signif$freshInt_ageLow_effect, dat_signif$freshInt_ageHigh_effect,
+                                         dat_signif$pastInt_ageLow_effect,  dat_signif$pastInt_ageHigh_effect),
+                       pvalue        = c(dat_signif$freshInt_ageLow_pvalue, dat_signif$freshInt_ageHigh_pvalue,
+                                         dat_signif$pastInt_ageLow_pvalue,  dat_signif$pastInt_ageHigh_pvalue),
+                       pastEffect_forSorting = rep(dat_signif$pastInt_ageLow_effect, times = 4)) %>% 
+  mutate(species       = gsub(pattern = "species:", replacement = "", x = species)) %>% 
+  dplyr::left_join(dat %>% select(species, phylum) %>% distinct(species, .keep_all = TRUE), by = "species") %>% 
+  arrange(desc(pastEffect_forSorting)) %>% 
+  mutate(pvalue_signif = case_when((pvalue < 0.05) & grepl("Fresh", intervention) & (effect > 0) ~ "significant pos. effect (fresh intervention)",
+                                   (pvalue < 0.05) & grepl("Fresh", intervention) & (effect < 0) ~ "significant neg. effect (fresh intervention)",
+                                   (pvalue < 0.05) & (effect > 0) ~ "significant pos. effect (pasteurized intervention)",
+                                   (pvalue < 0.05) & (effect < 0) ~ "significant neg. effect (pasteurized intervention)",
+                                   TRUE          ~ "not significant"),
+         species       = gsub(pattern = "_", replacement = " ", x = species),
+         effect_label  = case_when((model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 1)        ~ paste0("+", round(effect, 0), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.1)      ~ paste0("+", round(effect, 1), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.01)     ~ paste0("+", round(effect, 2), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.001)    ~ paste0("+", round(effect, 3), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.0001)   ~ paste0("+", round(effect, 4), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0)        ~ "+ <0.0001 PP",
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -1)       ~ paste0(round(effect, 0), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -0.1)     ~ paste0(round(effect, 1), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -0.01)    ~ paste0(round(effect, 2), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -0.001)   ~ paste0(round(effect, 3), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -0.0001)  ~ paste0(round(effect, 4), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect < 0)                   ~ "- >-0.0001 PP",
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) >= 1)             ~ paste0("+", round((100 * (exp(effect) - 1)), 0), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) >= 0.1)           ~ paste0("+", round((100 * (exp(effect) - 1)), 1), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) >= 0.01)          ~ paste0("+", round((100 * (exp(effect) - 1)), 2), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & (effect >= 0)                                ~ "+ <0.01%",
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) <= -1)            ~ paste0(round((100 * (exp(effect) - 1)), 0), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) <= -0.1)          ~ paste0(round((100 * (exp(effect) - 1)), 1), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) <= -0.01)         ~ paste0(round((100 * (exp(effect) - 1)), 2), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & (effect < 0)                                 ~ "- >-0.01%"))
+
+# artificially add the baseline rel. abd. as an 'intervention' and 'effect_label' to be able to nicely plot it
+dat_plot_list <- lapply(as.character(unique(dat_plot$species)), function(spec) {
+  dat_spec <- dat_plot %>% filter(species == spec)
+  dat_spec %>% 
+    dplyr::bind_rows(data.frame(species       = spec,
+                                intervention  = "Baseline median rel. abd.",
+                                phylum        = dat_spec$phylum[1],
+                                pvalue_signif = "",
+                                effect_label  = case_when(dat_spec$baseline_medianRelAbd < .0001 ~ "<0.0001%",
+                                                          dat_spec$baseline_medianRelAbd < .001  ~ paste0(round(dat_spec$baseline_medianRelAbd, 4), "%"),
+                                                          dat_spec$baseline_medianRelAbd < .01   ~ paste0(round(dat_spec$baseline_medianRelAbd, 3), "%"),
+                                                          dat_spec$baseline_medianRelAbd < .1    ~ paste0(round(dat_spec$baseline_medianRelAbd, 2), "%"),
+                                                          dat_spec$baseline_medianRelAbd < 1     ~ paste0(round(dat_spec$baseline_medianRelAbd, 1), "%"),
+                                                          TRUE ~ paste0(round(dat_spec$baseline_medianRelAbd, 0), "%"))))
+})
+dat_plot_ageIntp <- dat_plot_list %>% dplyr::bind_rows() %>% 
+  mutate(species      = factor(species, levels = rev(unique(species))),
+         intervention = factor(intervention, levels = c("Baseline median rel. abd.", "Fresh intervention\n(age low)", "Fresh intervention\n(age high)",
+                                                        "Pasteurized intervention\n(age low)", "Pasteurized intervention\n(age high)")),
+         text_highlight = case_when(grepl("Baseline", intervention) & (effect_label == "<0.0001%") ~ "no",
+                                    pvalue_signif == "not significant" ~ "no",
+                                    TRUE ~ "yes"))
+```
+
+##### create the sex interaction data
+
+... same as for the above plot, but also including species that showed significances in age or BMI interactions
+
+```{r}
+dat_signif <- dat_results %>% 
+  filter((freshInt_ageLow_pvalue < 0.05) | (freshInt_ageHigh_pvalue < 0.05) |
+           (pastInt_ageLow_pvalue < 0.05) | (pastInt_ageHigh_pvalue < 0.05) |
+           (freshInt_sexM_pvalue < 0.05) | (freshInt_sexW_pvalue < 0.05) |
+           (pastInt_sexM_pvalue < 0.05) | (pastInt_sexW_pvalue < 0.05) |
+           (freshInt_bmiLow_pvalue < 0.05) | (freshInt_bmiHigh_pvalue < 0.05) |
+           (pastInt_bmiLow_pvalue < 0.05) | (pastInt_bmiHigh_pvalue < 0.05))
+dat_plot <- data.frame(species       = rep(dat_signif$species,  times = 4),
+                       baseline_medianRelAbd = rep(dat_signif$baseline_medianRelAbd, times = 4),
+                       model         = rep(dat_signif$model, times = 4),
+                       intervention  = rep(c("Fresh intervention\n(gender male)", "Fresh intervention\n(gender female)",
+                                             "Pasteurized intervention\n(gender male)", "Pasteurized intervention\n(gender female)"), each = nrow(dat_signif)),
+                       effect        = c(dat_signif$freshInt_sexM_effect, dat_signif$freshInt_sexW_effect,
+                                         dat_signif$pastInt_sexM_effect,  dat_signif$pastInt_sexW_effect),
+                       pvalue        = c(dat_signif$freshInt_sexM_pvalue, dat_signif$freshInt_sexW_pvalue,
+                                         dat_signif$pastInt_sexM_pvalue,  dat_signif$pastInt_sexW_pvalue),
+                       pastEffect_forSorting = rep(dat_signif$pastInt_sexM_effect, times = 4)) %>% 
+  mutate(species       = gsub(pattern = "species:", replacement = "", x = species)) %>% 
+  dplyr::left_join(dat %>% select(species, phylum) %>% distinct(species, .keep_all = TRUE), by = "species") %>% 
+  arrange(desc(pastEffect_forSorting)) %>% 
+  mutate(pvalue_signif = case_when((pvalue < 0.05) & grepl("Fresh", intervention) & (effect > 0) ~ "significant pos. effect (fresh intervention)",
+                                   (pvalue < 0.05) & grepl("Fresh", intervention) & (effect < 0) ~ "significant neg. effect (fresh intervention)",
+                                   (pvalue < 0.05) & (effect > 0) ~ "significant pos. effect (pasteurized intervention)",
+                                   (pvalue < 0.05) & (effect < 0) ~ "significant neg. effect (pasteurized intervention)",
+                                   TRUE          ~ "not significant"),
+         species       = gsub(pattern = "_", replacement = " ", x = species),
+         effect_label  = case_when((model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 1)        ~ paste0("+", round(effect, 0), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.1)      ~ paste0("+", round(effect, 1), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.01)     ~ paste0("+", round(effect, 2), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.001)    ~ paste0("+", round(effect, 3), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.0001)   ~ paste0("+", round(effect, 4), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0)        ~ "+ <0.0001 PP",
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -1)       ~ paste0(round(effect, 0), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -0.1)     ~ paste0(round(effect, 1), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -0.01)    ~ paste0(round(effect, 2), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -0.001)   ~ paste0(round(effect, 3), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -0.0001)  ~ paste0(round(effect, 4), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect < 0)                   ~ "- >-0.0001 PP",
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) >= 1)             ~ paste0("+", round((100 * (exp(effect) - 1)), 0), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) >= 0.1)           ~ paste0("+", round((100 * (exp(effect) - 1)), 1), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) >= 0.01)          ~ paste0("+", round((100 * (exp(effect) - 1)), 2), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & (effect >= 0)                                ~ "+ <0.01%",
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) <= -1)            ~ paste0(round((100 * (exp(effect) - 1)), 0), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) <= -0.1)          ~ paste0(round((100 * (exp(effect) - 1)), 1), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) <= -0.01)         ~ paste0(round((100 * (exp(effect) - 1)), 2), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & (effect < 0)                                 ~ "- >-0.01%"))
+
+# artificially add the baseline rel. abd. as an 'intervention' and 'effect_label' to be able to nicely plot it
+dat_plot_list <- lapply(as.character(unique(dat_plot$species)), function(spec) {
+  dat_spec <- dat_plot %>% filter(species == spec)
+  dat_spec %>% 
+    dplyr::bind_rows(data.frame(species       = spec,
+                                intervention  = "Baseline median rel. abd.",
+                                phylum        = dat_spec$phylum[1],
+                                pvalue_signif = "",
+                                effect_label  = case_when(dat_spec$baseline_medianRelAbd < .0001 ~ "<0.0001%",
+                                                          dat_spec$baseline_medianRelAbd < .001  ~ paste0(round(dat_spec$baseline_medianRelAbd, 4), "%"),
+                                                          dat_spec$baseline_medianRelAbd < .01   ~ paste0(round(dat_spec$baseline_medianRelAbd, 3), "%"),
+                                                          dat_spec$baseline_medianRelAbd < .1    ~ paste0(round(dat_spec$baseline_medianRelAbd, 2), "%"),
+                                                          dat_spec$baseline_medianRelAbd < 1     ~ paste0(round(dat_spec$baseline_medianRelAbd, 1), "%"),
+                                                          TRUE ~ paste0(round(dat_spec$baseline_medianRelAbd, 0), "%"))))
+})
+dat_plot_sexIntp <- dat_plot_list %>% dplyr::bind_rows() %>% 
+  mutate(species      = factor(species, levels = rev(unique(species))),
+         intervention = factor(intervention, levels = c("Baseline median rel. abd.", "Fresh intervention\n(gender male)", "Fresh intervention\n(gender female)",
+                                                        "Pasteurized intervention\n(gender male)", "Pasteurized intervention\n(gender female)")),
+         text_highlight = case_when(grepl("Baseline", intervention) & (effect_label == "<0.0001%") ~ "no",
+                                    pvalue_signif == "not significant" ~ "no",
+                                    TRUE ~ "yes"))
+```
+
+
+##### create the BMI interaction data
+
+... same as for the above plot, but also including species that showed significances in age or sex interactions
+
+```{r}
+dat_signif <- dat_results %>% 
+  filter((freshInt_ageLow_pvalue < 0.05) | (freshInt_ageHigh_pvalue < 0.05) |
+           (pastInt_ageLow_pvalue < 0.05) | (pastInt_ageHigh_pvalue < 0.05) |
+           (freshInt_sexM_pvalue < 0.05) | (freshInt_sexW_pvalue < 0.05) |
+           (pastInt_sexM_pvalue < 0.05) | (pastInt_sexW_pvalue < 0.05) |
+           (freshInt_bmiLow_pvalue < 0.05) | (freshInt_bmiHigh_pvalue < 0.05) |
+           (pastInt_bmiLow_pvalue < 0.05) | (pastInt_bmiHigh_pvalue < 0.05))
+dat_plot <- data.frame(species       = rep(dat_signif$species,  times = 4),
+                       baseline_medianRelAbd = rep(dat_signif$baseline_medianRelAbd, times = 4),
+                       model         = rep(dat_signif$model, times = 4),
+                       intervention  = rep(c("Fresh intervention\n(BMI low)", "Fresh intervention\n(BMI high)",
+                                             "Pasteurized intervention\n(BMI low)", "Pasteurized intervention\n(BMI high)"), each = nrow(dat_signif)),
+                       effect        = c(dat_signif$freshInt_bmiLow_effect, dat_signif$freshInt_bmiHigh_effect,
+                                         dat_signif$pastInt_bmiLow_effect,  dat_signif$pastInt_bmiHigh_effect),
+                       pvalue        = c(dat_signif$freshInt_bmiLow_pvalue, dat_signif$freshInt_bmiHigh_pvalue,
+                                         dat_signif$pastInt_bmiLow_pvalue,  dat_signif$pastInt_bmiHigh_pvalue),
+                       pastEffect_forSorting = rep(dat_signif$pastInt_bmiLow_effect, times = 4)) %>% 
+  mutate(species       = gsub(pattern = "species:", replacement = "", x = species)) %>% 
+  dplyr::left_join(dat %>% select(species, phylum) %>% distinct(species, .keep_all = TRUE), by = "species") %>% 
+  arrange(desc(pastEffect_forSorting)) %>% 
+  mutate(pvalue_signif = case_when((pvalue < 0.05) & grepl("Fresh", intervention) & (effect > 0) ~ "significant pos. effect (fresh intervention)",
+                                   (pvalue < 0.05) & grepl("Fresh", intervention) & (effect < 0) ~ "significant neg. effect (fresh intervention)",
+                                   (pvalue < 0.05) & (effect > 0) ~ "significant pos. effect (pasteurized intervention)",
+                                   (pvalue < 0.05) & (effect < 0) ~ "significant neg. effect (pasteurized intervention)",
+                                   TRUE          ~ "not significant"),
+         species       = gsub(pattern = "_", replacement = " ", x = species),
+         effect_label  = case_when((model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 1)        ~ paste0("+", round(effect, 0), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.1)      ~ paste0("+", round(effect, 1), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.01)     ~ paste0("+", round(effect, 2), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.001)    ~ paste0("+", round(effect, 3), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.0001)   ~ paste0("+", round(effect, 4), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0)        ~ "+ <0.0001 PP",
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -1)       ~ paste0(round(effect, 0), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -0.1)     ~ paste0(round(effect, 1), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -0.01)    ~ paste0(round(effect, 2), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -0.001)   ~ paste0(round(effect, 3), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect <= -0.0001)  ~ paste0(round(effect, 4), " PP"),
+                                   (model %in% c("Gaussian", "ZI Gaussian")) & (effect < 0)                   ~ "- >-0.0001 PP",
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) >= 1)             ~ paste0("+", round((100 * (exp(effect) - 1)), 0), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) >= 0.1)           ~ paste0("+", round((100 * (exp(effect) - 1)), 1), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) >= 0.01)          ~ paste0("+", round((100 * (exp(effect) - 1)), 2), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & (effect >= 0)                                ~ "+ <0.01%",
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) <= -1)            ~ paste0(round((100 * (exp(effect) - 1)), 0), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) <= -0.1)          ~ paste0(round((100 * (exp(effect) - 1)), 1), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & ((100 * (exp(effect) - 1)) <= -0.01)         ~ paste0(round((100 * (exp(effect) - 1)), 2), "%"),
+                                   (model %in% c("log-Gaussian", "ZI log-Gaussian")) & (effect < 0)                                 ~ "- >-0.01%"))
+
+# artificially add the baseline rel. abd. as an 'intervention' and 'effect_label' to be able to nicely plot it
+dat_plot_list <- lapply(as.character(unique(dat_plot$species)), function(spec) {
+  dat_spec <- dat_plot %>% filter(species == spec)
+  dat_spec %>% 
+    dplyr::bind_rows(data.frame(species       = spec,
+                                intervention  = "Baseline median rel. abd.",
+                                phylum        = dat_spec$phylum[1],
+                                pvalue_signif = "",
+                                effect_label  = case_when(dat_spec$baseline_medianRelAbd < .0001 ~ "<0.0001%",
+                                                          dat_spec$baseline_medianRelAbd < .001  ~ paste0(round(dat_spec$baseline_medianRelAbd, 4), "%"),
+                                                          dat_spec$baseline_medianRelAbd < .01   ~ paste0(round(dat_spec$baseline_medianRelAbd, 3), "%"),
+                                                          dat_spec$baseline_medianRelAbd < .1    ~ paste0(round(dat_spec$baseline_medianRelAbd, 2), "%"),
+                                                          dat_spec$baseline_medianRelAbd < 1     ~ paste0(round(dat_spec$baseline_medianRelAbd, 1), "%"),
+                                                          TRUE ~ paste0(round(dat_spec$baseline_medianRelAbd, 0), "%"))))
+})
+dat_plot_bmiIntp <- dat_plot_list %>% dplyr::bind_rows() %>% 
+  mutate(species      = factor(species, levels = rev(unique(species))),
+         intervention = factor(intervention, levels = c("Baseline median rel. abd.", "Fresh intervention\n(BMI low)", "Fresh intervention\n(BMI high)",
+                                                        "Pasteurized intervention\n(BMI low)", "Pasteurized intervention\n(BMI high)")),
+         text_highlight = case_when(grepl("Baseline", intervention) & (effect_label == "<0.0001%") ~ "no",
+                                    pvalue_signif == "not significant" ~ "no",
+                                    TRUE ~ "yes"))
+```
+
+##### create the joint plot
+
+```{r}
+#| column: page
+#| fig-width: 20
+#| fig-height: 30
+
+# create tree plot
+tse_filtered <- tse[rowData(tse)$species %in% gsub(dat_plot_ageIntp$species, pattern = " ", replacement = "_"),]
+gg_tree <- mia::taxonomyTree(tse_filtered) %>% ggtree()
+
+# make sure the main heatmap has the same ordering as the tree
+gg_tree_build    <- ggplot_build(gg_tree + geom_tiplab()) # add tiplab to retrieve species labels
+species_ordering <- gg_tree_build$data[[3]] %>% arrange(desc(y)) %>% pull(label)
+species_ordering <- species_ordering %>% 
+  gsub(pattern = "species:", replacement = "") %>% 
+  gsub(pattern = "_",        replacement = " ")
+dat_plot_ageIntp <- dat_plot_ageIntp %>% mutate(species = factor(species, levels = rev(species_ordering)))
+dat_plot_sexIntp <- dat_plot_sexIntp %>% mutate(species = factor(species, levels = rev(species_ordering)))
+dat_plot_bmiIntp <- dat_plot_bmiIntp %>% mutate(species = factor(species, levels = rev(species_ordering)))
+
+# plots
+gg_heatmap_ageInt <- dat_plot_ageIntp %>% 
+  ggplot(aes(x = intervention, y = species)) +
+  geom_tile(aes(fill = pvalue_signif)) +
+  geom_text(aes(label = effect_label)) +
+  scale_fill_manual("uncorrected p-value", values = c("not significant" = "gray95",
+                                                      "significant pos. effect (fresh intervention)" = "#7cbde9",
+                                                      "significant neg. effect (fresh intervention)" = "#1F78B4",
+                                                      "significant pos. effect (pasteurized intervention)" = "#ffb366",
+                                                      "significant neg. effect (pasteurized intervention)" = "#FF7F00"),
+                    na.value = "white") +
+  ggtitle("Intervention effects on species") +
+  theme(axis.title = element_blank(),
+        panel.grid = element_blank())
+gg_heatmap_sexInt <- dat_plot_sexIntp %>% 
+  filter(!grepl("Baseline", intervention)) %>% 
+  ggplot(aes(x = intervention, y = species)) +
+  geom_tile(aes(fill = pvalue_signif)) +
+  geom_text(aes(label = effect_label)) +
+  scale_fill_manual("uncorrected p-value", values = c("not significant" = "gray95",
+                                                      "significant pos. effect (fresh intervention)" = "#7cbde9",
+                                                      "significant neg. effect (fresh intervention)" = "#1F78B4",
+                                                      "significant pos. effect (pasteurized intervention)" = "#ffb366",
+                                                      "significant neg. effect (pasteurized intervention)" = "#FF7F00"),
+                    na.value = "white") +
+  ggtitle("Intervention effects on species") +
+  theme(axis.title  = element_blank(),
+        axis.text.y = element_blank(),
+        panel.grid  = element_blank())
+gg_heatmap_bmiInt <- dat_plot_bmiIntp %>% 
+  filter(!grepl("Baseline", intervention)) %>% 
+  ggplot(aes(x = intervention, y = species)) +
+  geom_tile(aes(fill = pvalue_signif)) +
+  geom_text(aes(label = effect_label)) +
+  scale_fill_manual("uncorrected p-value", values = c("not significant" = "gray95",
+                                                      "significant pos. effect (fresh intervention)" = "#7cbde9",
+                                                      "significant neg. effect (fresh intervention)" = "#1F78B4",
+                                                      "significant pos. effect (pasteurized intervention)" = "#ffb366",
+                                                      "significant neg. effect (pasteurized intervention)" = "#FF7F00"),
+                    na.value = "white") +
+  ggtitle("Intervention effects on species") +
+  theme(axis.title  = element_blank(),
+        axis.text.y = element_blank(),
+        panel.grid  = element_blank())
+
+# align the two plots
+(gg_tree + gg_heatmap_ageInt + gg_heatmap_sexInt + gg_heatmap_bmiInt) +
+  patchwork::plot_layout(widths = c(.2, .3, .25, .25), nrow = 1, guides = "collect")
+
+# ggsave("functional_speciesScreening_allInteractions_pvalues.png", width = 30, height = 30)
+```
+
+
+## Joint plot of condensed information
+
+Focus on the four biggest phylum groups: Firmicutes, Bacteroidetes, Actinobacteria and Proteobacteria
+
+```{r}
+# data preparation
+plot_dat_wide <- dat_results %>% 
+  dplyr::left_join(dat %>% select(species, phylum) %>% mutate(species = paste0("species:", species)) %>% distinct(),
+                   by = "species") %>% 
+  filter(phylum %in% c("Firmicutes", "Bacteroidetes", "Actinobacteria", "Proteobacteria")) %>% 
+  mutate(phylum = droplevels(phylum)) %>% 
+  group_by(phylum) %>% 
+  summarize(n_species                    = n(),
+            n_freshSignifEffects_overall = sum(freshInt_pvalue         < 0.05),
+            n_freshSignifEffects_ageLow  = sum(freshInt_ageLow_pvalue  < 0.05),
+            n_freshSignifEffects_ageHigh = sum(freshInt_ageHigh_pvalue < 0.05),
+            n_freshSignifEffects_sexM    = sum(freshInt_sexM_pvalue    < 0.05),
+            n_freshSignifEffects_sexW    = sum(freshInt_sexW_pvalue    < 0.05),
+            n_freshSignifEffects_bmiLow  = sum(freshInt_bmiLow_pvalue  < 0.05),
+            n_freshSignifEffects_bmiHigh = sum(freshInt_bmiHigh_pvalue < 0.05),
+            n_pastSignifEffects_overall  = sum(pastInt_pvalue          < 0.05),
+            n_pastSignifEffects_ageLow   = sum(pastInt_ageLow_pvalue   < 0.05),
+            n_pastSignifEffects_ageHigh  = sum(pastInt_ageHigh_pvalue  < 0.05),
+            n_pastSignifEffects_sexM     = sum(pastInt_sexM_pvalue     < 0.05),
+            n_pastSignifEffects_sexW     = sum(pastInt_sexW_pvalue     < 0.05),
+            n_pastSignifEffects_bmiLow   = sum(pastInt_bmiLow_pvalue   < 0.05),
+            n_pastSignifEffects_bmiHigh  = sum(pastInt_bmiHigh_pvalue  < 0.05))
+
+
+# reshape dataset to long format
+plot_dat_long <- data.frame(phylum               = rep(plot_dat_wide$phylum, times = sum(grepl("freshSignifEffects", colnames(plot_dat_wide)))),
+                            n_species            = rep(plot_dat_wide$n_species, times = sum(grepl("freshSignifEffects", colnames(plot_dat_wide)))),
+                            effect_group         = rep(c("overall", "ageInt", "ageInt", "sexInt", "sexInt", "bmiInt", "bmiInt"),
+                                                       each = nrow(plot_dat_wide)),
+                            effect_type          = rep(c("overall", "ageLow", "ageHigh", "sexM", "sexW", "bmiLow", "bmiHigh"),
+                                                       each = nrow(plot_dat_wide)),
+                            n_freshSignifEffects = c(plot_dat_wide$n_freshSignifEffects_overall,
+                                                     plot_dat_wide$n_freshSignifEffects_ageLow,
+                                                     plot_dat_wide$n_freshSignifEffects_ageHigh,
+                                                     plot_dat_wide$n_freshSignifEffects_sexM,
+                                                     plot_dat_wide$n_freshSignifEffects_sexW,
+                                                     plot_dat_wide$n_freshSignifEffects_bmiLow,
+                                                     plot_dat_wide$n_freshSignifEffects_bmiHigh),
+                            n_pastSignifEffects  = c(plot_dat_wide$n_pastSignifEffects_overall,
+                                                     plot_dat_wide$n_pastSignifEffects_ageLow,
+                                                     plot_dat_wide$n_pastSignifEffects_ageHigh,
+                                                     plot_dat_wide$n_pastSignifEffects_sexM,
+                                                     plot_dat_wide$n_pastSignifEffects_sexW,
+                                                     plot_dat_wide$n_pastSignifEffects_bmiLow,
+                                                     plot_dat_wide$n_pastSignifEffects_bmiHigh)) %>% 
+  mutate(phylum_label = paste0(phylum, "\n", n_species, " species"),
+         effect_group = factor(effect_group, levels = c("overall", "ageInt", "sexInt", "bmiInt")),
+         effect_type  = factor(effect_type, levels = rev(c("overall", "ageLow", "ageHigh", "sexM", "sexW", "bmiLow", "bmiHigh"))))
+
+# make the dataset even longer
+plot_dat_longer <- data.frame(phylum       = rep(plot_dat_long$phylum,       times = 2),
+                              n_species    = rep(plot_dat_long$n_species,    times = 2),
+                              phylum_label = rep(plot_dat_long$phylum_label, times = 2),
+                              effect_group = rep(plot_dat_long$effect_group, times = 2),
+                              effect_type  = rep(plot_dat_long$effect_type,  times = 2),
+                              intervention = rep(c("Fresh", "Past."), each = nrow(plot_dat_long)),
+                              parameter    = "n_signifEffects",
+                              value        = c(plot_dat_long$n_freshSignifEffects,
+                                               plot_dat_long$n_pastSignifEffects)) %>% 
+  group_by(phylum, parameter, effect_group, intervention) %>% 
+  mutate(alpha_value = case_when(effect_group == "overall"  ~ 0.8,
+                                 value == min(value)        ~ 0,
+                                 TRUE                       ~ 1)) %>% 
+  ungroup() %>% 
+  mutate(fill_tiles = case_when(effect_type == "overall" ~ "no",
+                                TRUE ~ phylum),
+         alpha_tiles = case_when(effect_type %in% c("ageLow", "sexM", "bmiLow") ~ 0.05,
+                                 TRUE ~ 0.15))
+plot_dat_longer <- plot_dat_longer %>% mutate(phylum_label = factor(phylum_label, levels = plot_dat_longer %>% arrange(desc(n_species)) %>% 
+                                                                      pull(phylum_label) %>% unique()))
+
+
+# create a color vector for color coding the interaction terms
+col_vector <- RColorBrewer::brewer.pal(4, name = "Dark2")
+
+# plot
+gg_allInt_table <- ggplot(plot_dat_longer, aes(x = intervention, y = effect_type)) +
+  geom_tile(aes(fill = fill_tiles, alpha = alpha_tiles)) +
+  geom_text(aes(label = value, alpha = alpha_value)) +
+  facet_grid(effect_group ~ phylum_label, scales = "free") +
+  scale_fill_manual(values = c("no"             = "white",
+                               "Firmicutes"     = col_vector[1],
+                               "Bacteroidetes"  = col_vector[2],
+                               "Actinobacteria" = col_vector[3],
+                               "Proteobacteria" = col_vector[4])) +
+  theme(axis.title      = element_blank(),
+        panel.grid      = element_blank(),
+        legend.position = "none",
+        strip.background.x = element_rect(fill = "gray97", color = "gray97"),
+        strip.text.y    = element_blank())
+gg_allInt_table
+# ggsave("functional_speciesScreening_allInteractions_table.png", width = 7, height = 3.5)
+```
+
+
+# Main joint figures for the publication
+
+```{r}
+#| column: page
+#| fig-width: 13
+#| fig-height: 8
+
+# 1) plot of overall effects
+gg_overall <- dat_plot_overall %>% 
+  mutate(pvalue_signif = gsub(pvalue_signif, pattern = "significant ",  replacement = ""),
+         pvalue_signif = gsub(pvalue_signif, pattern = " intervention", replacement = ""),
+         pvalue_signif = gsub(pvalue_signif, pattern = "pasteurized",   replacement = "past."),
+         pvalue_signif = factor(pvalue_signif, levels = c("not significant", "pos. effect (fresh)",
+                                                          "neg. effect (fresh)", "pos. effect (past.)",
+                                                          "neg. effect (past.)", ""))) %>% 
+  ggplot(aes(x = intervention, y = species)) +
+  geom_tile(aes(fill = pvalue_signif)) +
+  geom_text(aes(label = effect_label, size = text_size)) +
+  scale_fill_manual("q-value", values = c("not significant"     = "gray95",
+                                          "pos. effect (fresh)" = "#7cbde9",
+                                          "neg. effect (fresh)" = "#1F78B4",
+                                          "pos. effect (past.)" = "#ffb366",
+                                          "neg. effect (past.)" = "#FF7F00"),
+                    na.value = "white") +
+  scale_size(range = c(3, 4), guide = "none") +
+  labs(tag = "(A)") +
+  theme_minimal(base_size = 14) +
+  theme(plot.title        = element_text(hjust = 0.5),
+        plot.tag.location = "plot",
+        plot.tag          = element_text(size = 18, margin = margin(t = -30)),
+        axis.title        = element_blank(),
+        panel.grid        = element_blank(),
+        strip.background  = element_rect(fill = "gray97", color = "gray97"),
+        legend.position   = "none")
+
+# 1.5) create the legend separately, also to ensure that all color categories are plotted
+category_labels <- c("not significant","pos. effect (fresh)","neg. effect (fresh)",
+                                     "pos. effect (past.)","neg. effect (past.)")
+gg_base    <- data.frame(x       = rnorm(n = 5),
+                         y       = rnorm(n = 5),
+                         col_var = factor(category_labels, levels = category_labels)) %>% 
+  ggplot(aes(x = x, y = y, fill = col_var)) +
+  geom_tile() +
+  scale_fill_manual("q-value", values = c("not significant"     = "gray95",
+                                          "pos. effect (fresh)" = "#7cbde9",
+                                          "neg. effect (fresh)" = "#1F78B4",
+                                          "pos. effect (past.)" = "#ffb366",
+                                          "neg. effect (past.)" = "#FF7F00"),
+                    na.value = "white") +
+  theme_minimal(base_size = 14) +
+  theme(legend.position = "bottom")
+gg_legend  <- ggpubr::get_legend(gg_base) %>% ggpubr::as_ggplot()
+
+
+# 2) plot of age-specific effects
+gg_age <- dat_plot_ageInt %>% 
+  filter(intervention != "Baseline median rel. abd.") %>% 
+  mutate(pvalue_signif = gsub(pvalue_signif, pattern = "significant ",  replacement = ""),
+         pvalue_signif = gsub(pvalue_signif, pattern = " intervention", replacement = ""),
+         pvalue_signif = gsub(pvalue_signif, pattern = "pasteurized",   replacement = "past."),
+         pvalue_signif = factor(pvalue_signif, levels = c("not significant", "pos. effect (fresh)",
+                                                          "neg. effect (fresh)", "pos. effect (past.)",
+                                                          "neg. effect (past.)", ""))) %>% 
+  mutate(intervention2 = gsub(intervention,  pattern = "Fresh intervention\n\\(",       replacement = ""),
+         intervention2 = gsub(intervention2, pattern = "Pasteurized intervention\n\\(", replacement = ""),
+         intervention2 = gsub(intervention2, pattern = "\\)", replacement = ""),
+         intervention2 = gsub(intervention2, pattern = "age low",  replacement = "age 21-49"),
+         intervention2 = gsub(intervention2, pattern = "age high", replacement = "age 50-69"),
+         intervention3 = gsub(intervention,  pattern = "\n\\(age low\\)",  replacement = ""),
+         intervention3 = gsub(intervention3, pattern = "\n\\(age high\\)", replacement = "")) %>%
+  ggplot(aes(x = intervention2, y = species)) +
+  geom_tile(aes(fill = pvalue_signif)) +
+  geom_text(aes(label = effect_label)) +
+  scale_fill_manual("q-value", values = c("not significant" = "gray95",
+                                          "pos. effect (fresh)" = "#7cbde9",
+                                          "neg. effect (fresh)" = "#1F78B4",
+                                          "pos. effect (past.)" = "#ffb366",
+                                          "neg. effect (past.)" = "#FF7F00"),
+                    na.value = "white") +
+  guides(fill = guide_legend(nrow = 1)) +
+  # facet_grid(rows = vars(phylum), cols = vars(intervention3), scales = "free", space = "free") +
+  facet_grid(cols = vars(intervention3), scales = "free", space = "free") +
+  # ggtitle("age-stratified effects") +
+  theme_minimal(base_size = 14) +
+  theme(plot.title = element_text(hjust = 0.5),
+        axis.title = element_blank(),
+        panel.grid = element_blank(),
+        strip.text.x     = element_blank(),
+        strip.background = element_rect(fill = "gray97", color = "gray97"),
+        legend.position  = "none")
+
+# 3) plot of gender-specific effects
+gg_sex <- dat_plot_sexInt %>% 
+  filter(intervention != "Baseline median rel. abd.") %>% 
+  mutate(pvalue_signif = gsub(pvalue_signif, pattern = "significant ",  replacement = ""),
+         pvalue_signif = gsub(pvalue_signif, pattern = " intervention", replacement = ""),
+         pvalue_signif = gsub(pvalue_signif, pattern = "pasteurized",   replacement = "past."),
+         pvalue_signif = factor(pvalue_signif, levels = c("not significant", "pos. effect (fresh)",
+                                                          "neg. effect (fresh)", "pos. effect (past.)",
+                                                          "neg. effect (past.)", ""))) %>% 
+  mutate(intervention2 = gsub(intervention,  pattern = "Fresh intervention\n\\(",       replacement = ""),
+         intervention2 = gsub(intervention2, pattern = "Pasteurized intervention\n\\(", replacement = ""),
+         intervention2 = gsub(intervention2, pattern = "\\)", replacement = ""),
+         intervention2 = gsub(intervention2, pattern = "gender ",  replacement = ""),
+         intervention2 = factor(intervention2, levels = c("male", "female")),
+         intervention3 = gsub(intervention,  pattern = "\n\\(gender male\\)",  replacement = ""),
+         intervention3 = gsub(intervention3, pattern = "\n\\(gender female\\)", replacement = "")) %>%
+  ggplot(aes(x = intervention2, y = species)) +
+  geom_tile(aes(fill = pvalue_signif)) +
+  geom_text(aes(label = effect_label)) +
+  scale_fill_manual("q-value", values = c("not significant" = "gray95",
+                                          "pos. effect (fresh)" = "#7cbde9",
+                                          "neg. effect (fresh)" = "#1F78B4",
+                                          "pos. effect (past.)" = "#ffb366",
+                                          "neg. effect (past.)" = "#FF7F00"),
+                    na.value = "white") +
+  # facet_grid(rows = vars(phylum), cols = vars(intervention3), scales = "free", space = "free") +
+  facet_grid(cols = vars(intervention3), scales = "free", space = "free") +
+  # ggtitle("Gender-specific effects") +
+  theme_minimal(base_size = 14) +
+  theme(plot.title = element_text(hjust = 0.5),
+        axis.title = element_blank(),
+        panel.grid = element_blank(),
+        strip.text.x     = element_blank(),
+        strip.background = element_rect(fill = "gray97", color = "gray97"),
+        legend.position = "none")
+
+# 4) plot of BMI-specific effects
+gg_bmi <- dat_plot_bmiInt %>% 
+  filter(intervention != "Baseline median rel. abd.") %>% 
+  mutate(pvalue_signif = gsub(pvalue_signif, pattern = "significant ",  replacement = ""),
+         pvalue_signif = gsub(pvalue_signif, pattern = " intervention", replacement = ""),
+         pvalue_signif = gsub(pvalue_signif, pattern = "pasteurized",   replacement = "past."),
+         pvalue_signif = factor(pvalue_signif, levels = c("not significant", "pos. effect (fresh)",
+                                                          "neg. effect (fresh)", "pos. effect (past.)",
+                                                          "neg. effect (past.)", ""))) %>% 
+  mutate(intervention2 = gsub(intervention,  pattern = "Fresh intervention\n\\(",       replacement = ""),
+         intervention2 = gsub(intervention2, pattern = "Pasteurized intervention\n\\(", replacement = ""),
+         intervention2 = gsub(intervention2, pattern = "\\)", replacement = ""),
+         intervention2 = gsub(intervention2, pattern = "BMI low",  replacement = "BMI [18, 25)"),
+         intervention2 = gsub(intervention2, pattern = "BMI high", replacement = "BMI [25, 31]"),
+         intervention3 = gsub(intervention,  pattern = "\n\\(BMI low\\)",  replacement = ""),
+         intervention3 = gsub(intervention3, pattern = "\n\\(BMI high\\)", replacement = "")) %>%
+  ggplot(aes(x = intervention2, y = species)) +
+  geom_tile(aes(fill = pvalue_signif)) +
+  geom_text(aes(label = effect_label)) +
+  scale_fill_manual("q-value", values = c("not significant" = "gray95",
+                                          "pos. effect (fresh)" = "#7cbde9",
+                                          "neg. effect (fresh)" = "#1F78B4",
+                                          "pos. effect (past.)" = "#ffb366",
+                                          "neg. effect (past.)" = "#FF7F00"),
+                    na.value = "white") +
+  # facet_grid(rows = vars(phylum), cols = vars(intervention3), scales = "free", space = "free") +
+  facet_grid(cols = vars(intervention3), scales = "free", space = "free") +
+  # ggtitle("BMI-specific effects") +
+  theme_minimal(base_size = 14) +
+  theme(plot.title = element_text(hjust = 0.5),
+        axis.title = element_blank(),
+        panel.grid = element_blank(),
+        strip.text.x     = element_blank(),
+        strip.background = element_rect(fill = "gray97", color = "gray97"),
+        legend.position = "none")
+
+# 5) plot of the overview table of the uncorrected p-value tendencies
+gg_table <- plot_dat_longer %>% 
+  mutate(effect_type = case_when(effect_type == "ageLow"  ~ "age 21-49",
+                                 effect_type == "ageHigh" ~ "age 50-69",
+                                 effect_type == "sexM"    ~ "male",
+                                 effect_type == "sexW"    ~ "female",
+                                 effect_type == "bmiLow"  ~ "BMI [18, 25)",
+                                 effect_type == "bmiHigh" ~ "BMI [25, 31]",
+                                 TRUE                     ~ effect_type),
+         effect_type = factor(effect_type, levels = c("overall",
+                                                      "age 50-69", "age 21-49",
+                                                      "female", "male",
+                                                      "BMI [25, 31]", "BMI [18, 25)"))) %>% 
+  ggplot(aes(x = intervention, y = effect_type)) +
+  geom_tile(aes(fill = fill_tiles, alpha = alpha_tiles)) +
+  geom_text(aes(label = value, alpha = alpha_value)) +
+  facet_grid(effect_group ~ phylum_label, scales = "free") +
+  scale_fill_manual(values = c("no"             = "white",
+                               "Firmicutes"     = col_vector[1],
+                               "Bacteroidetes"  = col_vector[2],
+                               "Actinobacteria" = col_vector[3],
+                               "Proteobacteria" = col_vector[4])) +
+  theme_minimal(base_size = 14) +
+  theme(plot.title      = element_text(hjust = 0.5),
+        axis.title      = element_blank(),
+        panel.grid      = element_blank(),
+        legend.position = "none",
+        strip.background.x = element_rect(fill = "gray97", color = "gray97"),
+        strip.text.y    = element_blank())
+
+
+# 6) small plot just for adding some in between titles to the joint plot
+text_dat <- data.frame(x = 0.5,
+                       y = 0.6,
+                       label = c("Stratified effects", "Summary of trends"))
+gg_header_base <- ggplot() +
+  geom_hline(yintercept = 0) +
+  xlim(c(0,1)) + ylim(c(0,1)) +
+  theme_minimal(base_size = 14) +
+  theme(panel.grid        = element_blank(),
+        plot.tag.location = "plot",
+        plot.tag          = element_text(size = 18, margin = margin(t = -5)),
+        axis.text         = element_blank(),
+        axis.title        = element_blank(),
+        plot.margin       = margin(t = 0, b = 0, l = 0, r = 0),
+        legend.position = "none")
+gg_headerA <- gg_header_base +
+  geom_text(data = text_dat %>% dplyr::slice(1), aes(x = x, y = y, label = label), size = 5) +
+  labs(tag = "(B)")
+gg_headerB <- gg_header_base +
+  geom_text(data = text_dat %>% dplyr::slice(2), aes(x = x, y = y, label = label), size = 5) +
+  labs(tag = "(C)")
+
+# 7) joint plot
+layout <- "
+AA
+BB
+CD
+EF
+EI
+GI
+HI
+HJ
+"
+(gg_overall + gg_legend + gg_headerA + gg_headerB + gg_age + ggplot() + gg_sex + gg_bmi + gg_table) +
+  patchwork::plot_layout(ncol = 2, heights = c(.9,.7,.15,.1,1,.3,.6,.1), design = layout) +
+  patchwork::plot_annotation(title = "Overall effects on species' abundance",
+                             theme    = theme(plot.title    = element_text(size = 16)))
+# ggsave("Figure5_speciesScreening.png", width = 13, height = 8)
+```
+
+
+##### Plot for supplements
+
+```{r}
+#| column: page
+#| fig-width: 20
+#| fig-height: 13
+
+gg1 <- gg_pvalues + theme(legend.position = "none")
+gg2 <- gg_qvalues +
+  guides(fill = guide_legend(nrow=5)) +
+  theme(legend.position = "bottom")
+gg3 <- gg_allInt_table
+
+layout <- "
+ABC
+ABD
+ABE
+ABE
+ABE
+"
+
+(gg1 + gg2 + ggplot() + gg3) +
+  patchwork::plot_layout(design  = layout,
+                         widths  = c(.2,.5,.3))
+# ggsave("functional_speciesScreening_allPlots.png", width = 20, height = 13)
+```

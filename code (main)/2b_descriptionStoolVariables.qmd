@@ -1,0 +1,748 @@
+---
+title: "Description Stool Sample Taxonomy"
+format:
+  html:
+    toc: true
+    code-fold: true
+    self-contained: true
+---
+
+## Data preparation
+
+```{r packages}
+#| warning: false
+
+library(sauerkrautTaxonomyBuddy)
+library(SummarizedExperiment) # microbiome analysis
+library(mia)                  # microbiome analysis
+library(vegan)                # (dis)similarity measures
+
+library(dplyr)      # data handling
+library(tidyr)      # data transformation
+library(ggplot2)    # data visualization
+library(patchwork)  # joint ggplots
+library(kableExtra) # table printing
+
+# set ggplot2 theme
+theme_set(
+  theme_minimal() +
+    theme(plot.title       = element_text(hjust = 0.5),
+          plot.subtitle    = element_text(hjust = 0.5),
+          panel.grid.minor = element_blank(),
+          plot.background  = element_rect(fill = "white", color = "white"))
+)
+```
+
+```{r set file paths}
+define_dataPaths()
+```
+
+```{r data preparation}
+#| warning: false
+
+tse <- readAndPrepare_mainTaxonomicData(path_groupInfoRdata               = path_groupInfoRdata,
+                                        path_participantRdata             = path_participantRdata,
+                                        path_samplesIDxlsx                = path_samplesIDxlsx,
+                                        path_dietInfoCsv                  = path_dietInfoCsv,
+                                        path_nutrientInfoCsv              = path_nutrientInfoCsv,
+                                        path_bloodMetabolomeXlsx          = path_bloodMetabolomeXlsx,
+                                        path_stoolMetabolomeXlsx          = path_stoolMetabolomeXlsx,
+                                        path_T4questXlsx                  = path_T4questXlsx,
+                                        path_stoolInfoXlsx                = path_stoolInfoXlsx,
+                                        path_bodyMeasuresXlsx             = path_bodyMeasuresXlsx,
+                                        path_absTaxonomyData              = path_absTaxonomyData,
+                                        path_relTaxonomyData              = path_relTaxonomyData,
+                                        path_sampleLookupXlsx             = path_sampleLookupXlsx,
+                                        path_krautLookupXlsx              = path_krautLookupXlsx,
+                                        path_bloodMarkerBostonRdata       = path_bloodMarkerBostonRdata,
+                                        path_bloodMarkerZentrallaborRdata = path_bloodMarkerZentrallaborRdata,
+                                        path_bloodMarkerBostonXlsx        = path_bloodMarkerBostonXlsx,
+                                        path_bloodMarkerZentrallaborXlsx  = path_bloodMarkerZentrallaborXlsx,
+                                        aggregation_level                 = "species",
+                                        exclude_sickParticipants          = "stool type analysis")
+
+dat <- tse %>% colData() %>% as.data.frame()
+```
+
+```{r}
+# categorize the age and bmi variables for testing category-specific intervention effects
+dat <- dat %>% 
+  mutate(age_cat = case_when(age < 50 ~ paste0(min(age), "-49"),
+                             TRUE     ~ paste0("50-", max(age))),
+         age_cat = factor(age_cat),
+         bmi_cat = case_when(bmi_t0 < 25 ~ paste0("[", floor(min(bmi_t0)), ", 25)"),
+                             TRUE        ~ paste0("[25, ", ceiling(max(bmi_t0)), "]")),
+         bmi_cat = factor(bmi_cat))
+```
+
+
+##### Round stool types
+
+```{r}
+n_oddStoolType <- dat$stool_type[!is.na(dat$stool_type) & (dat$stool_type != round(dat$stool_type))] %>% length()
+
+dat <- dat %>% mutate(stool_type = ceiling(stool_type))
+```
+
+`r n_oddStoolType` stool type measurements were odd numbers (1.5, 2.5, etc.), due
+to participants having been unsure about their stool type.
+These measurements were all rounded up to the next stool type.
+
+# Univariate descriptions
+
+## Stool type
+
+```{r}
+#| column: page
+#| fig-width: 12
+#| message: false
+
+gg_st_jitter <- dat %>% 
+  mutate(timepoint = as.numeric(timepoint)) %>% 
+  filter(!is.na(stool_type)) %>% 
+  ggplot(aes(x = timepoint, y = stool_type)) +
+  geom_point(position = "jitter") +
+  geom_smooth(se = FALSE) +
+  ggtitle("Stool type over time")
+
+gg_st_bar <- dat %>% 
+  filter(!is.na(stool_type)) %>% 
+  mutate(stool_type = factor(stool_type, levels = sort(unique(stool_type), decreasing = TRUE))) %>% 
+  ggplot(aes(x = timepoint, fill = stool_type)) +
+  geom_bar(position = "fill") +
+  ggtitle("Stool type over time")
+
+gg_st_jitter + gg_st_bar
+```
+
+```{r}
+dat %>% 
+  filter(!is.na(stool_type)) %>% 
+  ggplot(aes(x = timepoint, fill = stoolType_healthy)) +
+  geom_bar(position = "fill") +
+  ggtitle("Healthy stool type over time")
+```
+
+
+## Stool PH-value
+
+```{r}
+#| message: false
+
+set.seed(2024) # to control the jittering
+dat %>% 
+  mutate(timepoint = as.numeric(timepoint)) %>% 
+  filter(!is.na(ph_value)) %>% 
+  ggplot(aes(x = timepoint, y = ph_value)) +
+  geom_point(position = "jitter") +
+  geom_smooth(se = FALSE) +
+  scale_x_continuous(breaks = 1:5, labels = c("pre intervention 1", "post intervention 1",
+                                              "pre intervention 2", "post intervention 2",
+                                              "follow-up")) +
+  ylab("pH value") +
+  ggtitle("Stool pH value over time")
+# ggsave("pHvalue.png", width = 8, height = 5)
+```
+
+
+## Flatulence after the interventions
+
+```{r}
+#| column: page
+#| fig-width: 12
+
+gg_flatFresh <- dat %>% 
+  filter(timepoint %in% c("T2","T4"),
+         intervention == "Fresh") %>% 
+  ggplot(aes(x = "", fill = flatulence_afterFresh)) +
+  geom_bar(position = "fill") +
+  ggtitle("Flatulence after fresh intervention", subtitle = "Only showing measurements directly after a fresh intervention") +
+  theme(axis.title.x = element_blank())
+
+gg_flatPast <- dat %>% 
+  filter(timepoint %in% c("T2","T4"),
+         intervention == "Pasteurized") %>% 
+  ggplot(aes(x = "", fill = flatulence_afterPast)) +
+  geom_bar(position = "fill") +
+  ggtitle("Flatulence after pasteurized intervention", subtitle = "Only showing measurements directly after a pasteurized intervention") +
+  theme(axis.title.x = element_blank())
+
+gg_flatFresh + gg_flatPast
+```
+
+
+## Better digestion after the interventions
+
+```{r}
+#| column: page
+#| fig-width: 12
+
+gg_digFresh <- dat %>% 
+  filter(timepoint %in% c("T2","T4"),
+         intervention == "Fresh") %>% 
+  ggplot(aes(x = "", fill = betterDigestion_afterFresh)) +
+  geom_bar(position = "fill") +
+  ggtitle("Better digestion after fresh intervention", subtitle = "Only showing measurements directly after a fresh intervention") +
+  theme(axis.title.x = element_blank())
+
+gg_digPast <- dat %>% 
+  filter(timepoint %in% c("T2","T4"),
+         intervention == "Pasteurized") %>% 
+  ggplot(aes(x = "", fill = betterDigestion_afterPast)) +
+  geom_bar(position = "fill") +
+  ggtitle("Better digestion after pasteurized intervention", subtitle = "Only showing measurements directly after a pasteurized intervention") +
+  theme(axis.title.x = element_blank())
+
+gg_digFresh + gg_digPast
+```
+
+## Cross table of flatulence and digestion
+
+```{r}
+# corresponding crosstab
+dat_tab <- dat %>% 
+  group_by(participant_id) %>% 
+  summarize(flatulence_afterFresh = case_when(any(flatulence_afterFresh == "yes") ~ "flatulence after fresh",
+                                              TRUE                                ~ "no flat. after fresh"),
+            flatulence_afterPast  = case_when(any(flatulence_afterPast  == "yes") ~ "flatulence after past",
+                                              TRUE                                ~ "no flat. after past"),
+            betterDig_afterFresh  = case_when(any(betterDigestion_afterFresh == "yes") ~ "better dig. after fresh",
+                                              TRUE                                     ~ "no better dig. after fresh"),
+            betterDig_afterPast   = case_when(any(betterDigestion_afterPast  == "yes") ~ "better dig. after past",
+                                              TRUE                                     ~ "no better dig. after past"))
+
+table(dat_tab$flatulence_afterFresh, dat_tab$flatulence_afterPast, deparse.level = 2) %>% 
+  kable() %>% kable_styling()
+table(dat_tab$betterDig_afterFresh, dat_tab$betterDig_afterPast, deparse.level = 2) %>% 
+  kable() %>% kable_styling()
+
+table(dat_tab$flatulence_afterFresh, dat_tab$betterDig_afterFresh, deparse.level = 2) %>% 
+  kable() %>% kable_styling()
+table(dat_tab$flatulence_afterPast, dat_tab$betterDig_afterPast, deparse.level = 2) %>% 
+  kable() %>% kable_styling()
+```
+
+
+# Stool type against other variables
+
+## ... against PH-value
+
+```{r}
+#| column: page
+#| fig-width: 12
+#| message: false
+
+gg_ph_st_jitter <- dat %>% 
+  filter(!is.na(ph_value),
+         !is.na(stool_type)) %>% 
+  ggplot(aes(x = ph_value, y = stool_type)) +
+  geom_point(position = "jitter") +
+  geom_smooth(se = FALSE) +
+  ggtitle("Stool type against PH-value")
+
+gg_ph_st_binary <- dat %>% 
+  filter(!is.na(ph_value),
+         !is.na(stoolType_healthy)) %>% 
+  mutate(stoolType_healthy = as.numeric(stoolType_healthy) - 1) %>% 
+  ggplot(aes(x = ph_value, y = stoolType_healthy)) +
+  geom_point(position = "jitter") +
+  geom_smooth(se = FALSE) +
+  scale_y_continuous(breaks = c(0,1), labels = c("no","yes")) +
+  ggtitle("Healthy stool type against PH-value")
+
+gg_ph_st_jitter + gg_ph_st_binary
+```
+
+
+## ... against flatulence after the interventions
+
+NOTE: Currently potentially different color schemes in the side-by-side plots!
+
+```{r}
+#| column: page
+#| fig-width: 12
+
+### fresh intervention plots
+gg_Fbefore <- dat %>% 
+  filter(timepoint %in% c("T1","T3"),
+         intervention == "Fresh",
+         !is.na(stool_type)) %>% 
+  mutate(stool_type = factor(stool_type)) %>% 
+  ggplot(aes(x = flatulence_afterFresh, fill = stool_type)) +
+  geom_bar(position = "fill") +
+  ggtitle("Stool type against flatulence after fresh intervention",
+          subtitle = "Only showing measurements directly BEFORE a fresh intervention")
+
+gg_Fafter <- dat %>% 
+  filter(timepoint %in% c("T2","T4"),
+         intervention == "Fresh",
+         !is.na(stool_type)) %>% 
+  mutate(stool_type = factor(stool_type)) %>% 
+  ggplot(aes(x = flatulence_afterFresh, fill = stool_type)) +
+  geom_bar(position = "fill") +
+  ggtitle("Stool type against flatulence after fresh intervention",
+          subtitle = "Only showing measurements directly AFTER a fresh intervention")
+
+gg_Fbefore + gg_Fafter
+
+# underlying data in table form
+dat %>% 
+  filter(grepl("Fresh", inter_treat)) %>% 
+  mutate(x = paste0(flatulence_afterFresh, ", ", inter_treat)) %>% 
+  reframe(st_type = names(table(stool_type)),
+          freq    = unname(table(stool_type)),
+          .by     = x) %>% 
+  pivot_wider(names_from = x, values_from = freq, id_cols = st_type) %>% 
+  mutate(across(everything(), function(x) { ifelse(is.na(x), 0, x) } ),
+         across(contains("Fresh"), function(x) { paste0(x, " (", paste0(round(100 * x / sum(x)), "%"), ")") })) %>% 
+  dplyr::rename(stool_type = st_type) %>% 
+  select(stool_type, contains("Baseline"), contains("After")) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+
+```{r}
+#| column: page
+#| fig-width: 12
+
+### pasteurized intervention plots
+gg_Pbefore <- dat %>% 
+  filter(timepoint %in% c("T1","T3"),
+         intervention == "Pasteurized",
+         !is.na(stool_type)) %>% 
+  mutate(stool_type = factor(stool_type)) %>% 
+  ggplot(aes(x = flatulence_afterFresh, fill = stool_type)) +
+  geom_bar(position = "fill") +
+  ggtitle("Stool type against flatulence after pasteurized intervention",
+          subtitle = "Only showing measurements directly BEFORE a pasteurized intervention")
+
+gg_Pafter <- dat %>% 
+  filter(timepoint %in% c("T2","T4"),
+         intervention == "Pasteurized",
+         !is.na(stool_type)) %>% 
+  mutate(stool_type = factor(stool_type)) %>% 
+  ggplot(aes(x = flatulence_afterFresh, fill = stool_type)) +
+  geom_bar(position = "fill") +
+  ggtitle("Stool type against flatulence after pasteurized intervention",
+          subtitle = "Only showing measurements directly AFTER a pasteurized intervention")
+
+gg_Pbefore + gg_Pafter
+
+# underlying data in table form
+dat %>% 
+  filter(grepl("Past", inter_treat)) %>% 
+  mutate(x = paste0(flatulence_afterFresh, ", ", inter_treat)) %>% 
+  reframe(st_type = names(table(stool_type)),
+          freq    = unname(table(stool_type)),
+          .by     = x) %>% 
+  pivot_wider(names_from = x, values_from = freq, id_cols = st_type) %>% 
+  mutate(across(everything(), function(x) { ifelse(is.na(x), 0, x) } ),
+         across(contains("Past"), function(x) { paste0(x, " (", paste0(round(100 * x / sum(x)), "%"), ")") })) %>% 
+  dplyr::rename(stool_type = st_type) %>% 
+  select(stool_type, contains("Baseline"), contains("After")) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+
+## ... against better digestion after the interventions
+
+```{r}
+#| column: page
+#| fig-width: 12
+
+### fresh intervention plots
+gg_Fbefore <- dat %>% 
+  filter(timepoint %in% c("T1","T3"),
+         intervention == "Fresh",
+         !is.na(stool_type)) %>% 
+  mutate(stool_type = factor(stool_type)) %>% 
+  ggplot(aes(x = betterDigestion_afterFresh, fill = stool_type)) +
+  geom_bar(position = "fill") +
+  ggtitle("Stool type against better digestion after fresh intervention",
+          subtitle = "Only showing measurements directly BEFORE a fresh intervention")
+
+gg_Fafter <- dat %>% 
+  filter(timepoint %in% c("T2","T4"),
+         intervention == "Fresh",
+         !is.na(stool_type)) %>% 
+  mutate(stool_type = factor(stool_type)) %>% 
+  ggplot(aes(x = betterDigestion_afterFresh, fill = stool_type)) +
+  geom_bar(position = "fill") +
+  ggtitle("Stool type against better digestion after fresh intervention",
+          subtitle = "Only showing measurements directly AFTER a fresh intervention")
+
+gg_Fbefore + gg_Fafter
+
+# underlying data in table form
+dat %>% 
+  filter(grepl("Fresh", inter_treat)) %>% 
+  mutate(x = paste0(betterDigestion_afterFresh, ", ", inter_treat)) %>% 
+  reframe(st_type = names(table(stool_type)),
+          freq    = unname(table(stool_type)),
+          .by     = x) %>% 
+  pivot_wider(names_from = x, values_from = freq, id_cols = st_type) %>% 
+  mutate(across(everything(), function(x) { ifelse(is.na(x), 0, x) } ),
+         across(contains("Fresh"), function(x) { paste0(x, " (", paste0(round(100 * x / sum(x)), "%"), ")") })) %>% 
+  dplyr::rename(stool_type = st_type) %>% 
+  select(stool_type, contains("Baseline"), contains("After")) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+
+```{r}
+#| column: page
+#| fig-width: 12
+
+### pasteurized intervention plots
+gg_Pbefore <- dat %>% 
+  filter(timepoint %in% c("T1","T3"),
+         intervention == "Pasteurized",
+         !is.na(stool_type)) %>% 
+  mutate(stool_type = factor(stool_type)) %>% 
+  ggplot(aes(x = betterDigestion_afterPast, fill = stool_type)) +
+  geom_bar(position = "fill") +
+  ggtitle("Stool type against better digestion after pasteurized intervention",
+          subtitle = "Only showing measurements directly BEFORE a pasteurized intervention")
+
+gg_Pafter <- dat %>% 
+  filter(timepoint %in% c("T2","T4"),
+         intervention == "Pasteurized",
+         !is.na(stool_type)) %>% 
+  mutate(stool_type = factor(stool_type)) %>% 
+  ggplot(aes(x = betterDigestion_afterPast, fill = stool_type)) +
+  geom_bar(position = "fill") +
+  ggtitle("Stool type against better digestion after pasteurized intervention",
+          subtitle = "Only showing measurements directly AFTER a pasteurized intervention")
+
+gg_Pbefore + gg_Pafter
+
+# underlying data in table form
+dat %>% 
+  filter(grepl("Past", inter_treat)) %>% 
+  mutate(x = paste0(betterDigestion_afterPast, ", ", inter_treat)) %>% 
+  reframe(st_type = names(table(stool_type)),
+          freq    = unname(table(stool_type)),
+          .by     = x) %>% 
+  pivot_wider(names_from = x, values_from = freq, id_cols = st_type) %>% 
+  mutate(across(everything(), function(x) { ifelse(is.na(x), 0, x) } ),
+         across(contains("Past"), function(x) { paste0(x, " (", paste0(round(100 * x / sum(x)), "%"), ")") })) %>% 
+  dplyr::rename(stool_type = st_type) %>% 
+  select(stool_type, contains("Baseline"), contains("After")) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+
+# Figures for publication
+
+## Stool type
+
+```{r}
+#| column: page
+#| fig-width: 14
+#| fig-height: 12
+
+# for plot where at least one stool type value is missing, ensure that the same color vector is used,
+# based on a function that produces the default ggplot color values
+gg_color_hue <- function(n) {
+  hues = seq(15, 375, length = n + 1)
+  hcl(h = hues, l = 65, c = 100)[1:n]
+}
+col_vector <- gg_color_hue(7)
+
+
+# 1) stool type over time
+gg_st_bar <- dat %>% 
+  filter(!is.na(stool_type)) %>% 
+  mutate(stool_type = factor(stool_type),
+         timepoint  = factor(timepoint, levels = c("T1", "T2", "T3", "T4", "T5"),
+                             labels = c("pre intervention 1", "post intervention 1",
+                                        "pre intervention 2", "post intervention 2",
+                                        "follow-up"))) %>% 
+  ggplot(aes(x = timepoint, fill = stool_type)) +
+  geom_bar(position = "fill") +
+  scale_y_continuous("relative frequency", labels = scales::label_percent()) +
+  scale_fill_discrete("stool type") +
+  ggtitle("Stool type over time") +
+  theme_minimal(base_size = 14) +
+  theme(plot.title         = element_text(hjust = 0.5),
+        panel.grid.minor   = element_blank(),
+        panel.grid.major.x = element_blank())
+
+# 2) stool type vs. better digestion after fresh intervention
+# 2a) showing stool type measurements directly before fresh intervention
+gg_Fbefore <- dat %>% 
+  filter(timepoint %in% c("T1","T3"),
+         intervention == "Fresh",
+         !is.na(stool_type)) %>% 
+  mutate(stool_type = factor(stool_type)) %>% 
+  ggplot(aes(x = betterDigestion_afterFresh, fill = stool_type)) +
+  geom_bar(position = "fill") +
+  scale_y_continuous("relative frequency", labels = scales::label_percent()) +
+  xlab("better digestion after fresh intervention") +
+  ggtitle("Stool type vs. digestion after fresh intervention",
+          subtitle = "Only showing measurements BEFORE the fresh intervention") +
+  theme_minimal(base_size = 14) +
+  theme(plot.title         = element_text(hjust = 0.5),
+        panel.grid.minor   = element_blank(),
+        panel.grid.major.x = element_blank(),
+        legend.position    = "none")
+
+# 2b) showing stool type measurements directly after fresh intervention
+gg_Fafter <- dat %>% 
+  filter(timepoint %in% c("T2","T4"),
+         intervention == "Fresh",
+         !is.na(stool_type)) %>% 
+  mutate(stool_type = factor(stool_type)) %>% 
+  ggplot(aes(x = betterDigestion_afterFresh, fill = stool_type)) +
+  geom_bar(position = "fill") +
+  xlab("better digestion after fresh intervention") +
+  ggtitle("Stool type vs. digestion after fresh intervention",
+          subtitle = "Only showing measurements AFTER the fresh intervention") +
+  theme_minimal(base_size = 14) +
+  theme(plot.title         = element_text(hjust = 0.5),
+        panel.grid.minor   = element_blank(),
+        panel.grid.major.x = element_blank(),
+        axis.title.y       = element_blank(),
+        axis.text.y        = element_blank(),
+        legend.position    = "none")
+
+
+# 3) stool type vs. better digestion after pasteurized intervention
+# 3a) showing stool type measurements directly before pasteurized intervention
+gg_Pbefore <- dat %>% 
+  filter(timepoint %in% c("T1","T3"),
+         intervention == "Pasteurized",
+         !is.na(stool_type)) %>% 
+  mutate(stool_type = factor(stool_type)) %>% 
+  ggplot(aes(x = betterDigestion_afterPast, fill = stool_type)) +
+  geom_bar(position = "fill") +
+  scale_y_continuous("relative frequency", labels = scales::label_percent()) +
+  xlab("better digestion after pasteurized intervention") +
+  ggtitle("Stool type vs. digestion after past. intervention",
+          subtitle = "Only showing measurements BEFORE the past. intervention") +
+  scale_fill_manual("stool type", values = col_vector) +
+  theme_minimal(base_size = 14) +
+  theme(plot.title         = element_text(hjust = 0.5),
+        panel.grid.minor   = element_blank(),
+        panel.grid.major.x = element_blank(),
+        legend.position    = "none")
+
+# 3b) showing stool type measurements directly after pasteurized intervention
+gg_Pafter <- dat %>% 
+  filter(timepoint %in% c("T2","T4"),
+         intervention == "Pasteurized",
+         !is.na(stool_type)) %>% 
+  mutate(stool_type = factor(stool_type)) %>% 
+  ggplot(aes(x = betterDigestion_afterPast, fill = stool_type)) +
+  geom_bar(position = "fill") +
+  xlab("better digestion after pasteurized intervention") +
+  ggtitle("Stool type vs. digestion after past. intervention",
+          subtitle = "Only showing measurements AFTER the past. intervention") +
+  theme_minimal(base_size = 14) +
+  theme(plot.title         = element_text(hjust = 0.5),
+        panel.grid.minor   = element_blank(),
+        panel.grid.major.x = element_blank(),
+        axis.title.y       = element_blank(),
+        axis.text.y        = element_blank(),
+        legend.position    = "none")
+
+
+# joint plot
+layout <- "
+AA
+BC
+DE
+"
+gg_st_bar + gg_Fbefore + gg_Fafter + gg_Pbefore + gg_Pafter +
+  patchwork::plot_layout(nrow = 1, guides = "collect", design = layout)
+# ggsave("FigureS2_stoolVariables.png", width = 14, height = 12)
+```
+
+
+## Joint figure of stool variables
+
+
+```{r}
+base_size <- 16
+
+dat <- dat %>% 
+  mutate(gender_new   = factor(gender, levels = c("M", "W"), labels = c("male", "female")),
+         bowelMov_new = factor(bowelMovement_freq,
+                               levels = c("> 3 x taeglich", "3 x taeglich", "2 x taeglich",
+                                          "1 x taeglich", "1 x alle 2 Tage", "1 x alle 3 Tage",
+                                          "< 1 x alle 3 Tage"),
+                               labels = c("> 3 x daily", "3 x daily", "2 x daily",
+                                          "1 x daily", "1 x every 2 days", "1 x every 3 days",
+                                          "< 1 x every 3 days")))
+
+
+# stool type
+gg_st <- dat %>% 
+  filter(!is.na(stool_type)) %>% 
+  mutate(stool_type = factor(stool_type)) %>% 
+  ggplot(aes(x = "overall", fill = stool_type)) +
+  geom_bar(position = "fill") +
+  scale_y_continuous("relative frequency", labels = scales::percent) +
+  labs(tag = "(A)") +
+  theme_minimal(base_size = base_size) +
+  theme(plot.tag.location  = "plot",
+        plot.tag           = element_text(size = 18, hjust = .7),
+        legend.position    = "none",
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor   = element_blank(),
+        axis.title.x       = element_blank(),
+        axis.text.x        = element_blank())
+gg_st_sex <- dat %>% 
+  filter(!is.na(stool_type)) %>% 
+  mutate(stool_type = factor(stool_type)) %>% 
+  ggplot(aes(x = gender_new, fill = stool_type)) +
+  geom_bar(position = "fill") +
+  theme_minimal(base_size = base_size) +
+  theme(legend.position    = "none",
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor   = element_blank(),
+        axis.title         = element_blank(),
+        axis.text.y        = element_blank(),
+        axis.text.x        = element_blank())
+gg_st_age <- dat %>% 
+  filter(!is.na(stool_type)) %>% 
+  mutate(stool_type = factor(stool_type)) %>% 
+  ggplot(aes(x = age_cat, fill = stool_type)) +
+  geom_bar(position = "fill") +
+  theme_minimal(base_size = base_size) +
+  theme(legend.position    = "none",
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor   = element_blank(),
+        axis.title         = element_blank(),
+        axis.text.y        = element_blank(),
+        axis.text.x        = element_blank())
+gg_st_bmi <- dat %>% 
+  filter(!is.na(stool_type)) %>% 
+  mutate(stool_type = factor(stool_type)) %>% 
+  ggplot(aes(x = bmi_cat, fill = stool_type)) +
+  geom_bar(position = "fill") +
+  scale_fill_discrete("stool type") +
+  theme_minimal(base_size = base_size) +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor   = element_blank(),
+        axis.title         = element_blank(),
+        axis.text.y        = element_blank(),
+        axis.text.x        = element_blank())
+
+# PH value
+gg_ph <- dat %>% 
+  ggplot(aes(x = "overall", y = ph_value)) +
+  geom_boxplot() +
+  stat_summary(fun = mean, geom = "point", shape = 18, size = 5, col = "gray20") +
+  ylab("pH value") +
+  labs(tag = "(B)") +
+  theme_minimal(base_size = base_size) +
+  theme(plot.tag.location  = "plot",
+        plot.tag           = element_text(size = 18, hjust = .7),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor   = element_blank(),
+        axis.title.x       = element_blank(),
+        axis.text.x        = element_blank())
+gg_ph_sex <- dat %>% 
+  ggplot(aes(x = gender_new, y = ph_value)) +
+  geom_boxplot() +
+  stat_summary(fun = mean, geom = "point", shape = 18, size = 5, col = "gray20") +
+  theme_minimal(base_size = base_size) +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor   = element_blank(),
+        axis.title         = element_blank(),
+        axis.text.y        = element_blank(),
+        axis.text.x        = element_blank())
+gg_ph_age <- dat %>% 
+  ggplot(aes(x = age_cat, y = ph_value)) +
+  geom_boxplot() +
+  stat_summary(fun = mean, geom = "point", shape = 18, size = 5, col = "gray20") +
+  theme_minimal(base_size = base_size) +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor   = element_blank(),
+        axis.title         = element_blank(),
+        axis.text.y        = element_blank(),
+        axis.text.x        = element_blank())
+gg_ph_bmi <- dat %>% 
+  ggplot(aes(x = bmi_cat, y = ph_value)) +
+  geom_boxplot() +
+  stat_summary(fun = mean, geom = "point", shape = 18, size = 5, col = "gray20") +
+  theme_minimal(base_size = base_size) +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor   = element_blank(),
+        axis.title         = element_blank(),
+        axis.text.y        = element_blank(),
+        axis.text.x        = element_blank())
+
+# bowel movement frequency
+gg_bm <- dat %>% 
+  filter(!is.na(bowelMov_new)) %>%
+  ggplot(aes(x = "overall", fill = bowelMov_new)) +
+  geom_bar(position = "fill") +
+  scale_y_continuous("relative frequency", labels = scales::percent) +
+  labs(tag = "(C)") +
+  theme_minimal(base_size = base_size) +
+  theme(plot.tag.location  = "plot",
+        plot.tag           = element_text(size = 18, hjust = .7),
+        legend.position    = "none",
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor   = element_blank(),
+        axis.title.x       = element_blank())
+gg_bm_sex <- dat %>% 
+  filter(!is.na(bowelMov_new)) %>%
+  ggplot(aes(x = gender_new, fill = bowelMov_new)) +
+  geom_bar(position = "fill") +
+  xlab("sex") +
+  theme_minimal(base_size = base_size) +
+  theme(legend.position    = "none",
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor   = element_blank(),
+        axis.title.y       = element_blank(),
+        axis.text.y        = element_blank())
+gg_bm_age <- dat %>% 
+  filter(!is.na(bowelMov_new)) %>%
+  ggplot(aes(x = age_cat, fill = bowelMov_new)) +
+  geom_bar(position = "fill") +
+  xlab("age") +
+  theme_minimal(base_size = base_size) +
+  theme(legend.position    = "none",
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor   = element_blank(),
+        axis.title.y       = element_blank(),
+        axis.text.y        = element_blank())
+gg_bm_bmi <- dat %>% 
+  filter(!is.na(bowelMov_new)) %>%
+  ggplot(aes(x = bmi_cat, fill = bowelMov_new)) +
+  geom_bar(position = "fill") +
+  xlab("BMI") +
+  scale_fill_discrete("bowel movement\nfrequency") +
+  theme_minimal(base_size = base_size) +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor   = element_blank(),
+        axis.title.y       = element_blank(),
+        axis.text.y        = element_blank())
+```
+
+```{r}
+#| column: page
+#| fig-width: 12
+#| fig-height: 10
+#| warning: false
+#| message: false
+
+# joint plot
+layout <- "
+ABCD
+EFGH
+IJKL
+"
+gg_st + gg_st_sex + gg_st_age + gg_st_bmi +
+  gg_ph + gg_ph_sex + gg_ph_age + gg_ph_bmi +
+  gg_bm + gg_bm_sex + gg_bm_age + gg_bm_bmi +
+  patchwork::plot_layout(design = layout)
+# ggsave("FigureS2_stoolVariables.png", width = 12, height = 10)
+```

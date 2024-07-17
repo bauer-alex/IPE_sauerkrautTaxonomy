@@ -1,0 +1,258 @@
+---
+title: "Description Microbiome Changes with focus on phylum level"
+format:
+  html:
+    toc: true
+    code-fold: true
+    embed-resources: true
+---
+
+## Data preparation
+
+```{r packages}
+#| warning: false
+
+library(sauerkrautTaxonomyBuddy)
+library(SummarizedExperiment) # microbiome analysis
+
+library(dplyr)      # data handling
+library(tidyr)      # data transformation
+library(ggplot2)    # data visualization
+library(kableExtra) # table printing
+
+theme_set(theme_minimal()) # set ggplot2 theme
+```
+
+```{r set file paths}
+define_dataPaths()
+```
+
+```{r data preparation}
+#| warning: false
+
+tse <- readAndPrepare_mainTaxonomicData(path_groupInfoRdata               = path_groupInfoRdata,
+                                        path_participantRdata             = path_participantRdata,
+                                        path_samplesIDxlsx                = path_samplesIDxlsx,
+                                        path_dietInfoCsv                  = path_dietInfoCsv,
+                                        path_nutrientInfoCsv              = path_nutrientInfoCsv,
+                                        path_bloodMetabolomeXlsx          = path_bloodMetabolomeXlsx,
+                                        path_stoolMetabolomeXlsx          = path_stoolMetabolomeXlsx,
+                                        path_T4questXlsx                  = path_T4questXlsx,
+                                        path_stoolInfoXlsx                = path_stoolInfoXlsx,
+                                        path_bodyMeasuresXlsx             = path_bodyMeasuresXlsx,
+                                        path_absTaxonomyData              = path_absTaxonomyData,
+                                        path_relTaxonomyData              = path_relTaxonomyData,
+                                        path_sampleLookupXlsx             = path_sampleLookupXlsx,
+                                        path_krautLookupXlsx              = path_krautLookupXlsx,
+                                        path_bloodMarkerBostonRdata       = path_bloodMarkerBostonRdata,
+                                        path_bloodMarkerZentrallaborRdata = path_bloodMarkerZentrallaborRdata,
+                                        path_bloodMarkerBostonXlsx        = path_bloodMarkerBostonXlsx,
+                                        path_bloodMarkerZentrallaborXlsx  = path_bloodMarkerZentrallaborXlsx,
+                                        aggregation_level                 = "species",
+                                        exclude_sickParticipants          = "taxonomy paper")
+
+dat <- tse %>% 
+  colData() %>% 
+  as.data.frame()
+```
+
+## Choose three random participants
+
+... for which to create some the following visualizations
+
+```{r participant choice}
+participants <- dat$participant_id %>% unique() %>% as.character() %>% sample(size = 3) %>% sort()
+```
+
+```{r participant data preparation}
+datShort_list <- lapply(participants, function(x) {
+  
+  # retrieve the sample names for the participant
+  dat_sampleIDs <- dat %>% 
+    filter(participant_id == x) %>% 
+    select(inter_treat)
+  ids_samples        <- row.names(dat_sampleIDs)
+  names(ids_samples) <- dat_sampleIDs$inter_treat
+  
+  # create a dataset with all taxonomic groupings in columns
+  dat_tax <- tse %>% 
+    rowData() %>% 
+    as.data.frame() %>% 
+    mutate(species = row.names(.))
+  row.names(dat_tax) <- NULL
+  
+  # create one base dataset for all figures
+  dat_relAbd <- tse %>% 
+    assay("relAbd") %>% 
+    as.data.frame() %>% 
+    select(all_of(ids_samples)) %>% 
+    mutate(species = row.names(.)) %>% 
+    pivot_longer(cols = -species, names_to = "inter_treat", values_to = "relative_abundance") %>% 
+    select(inter_treat, relative_abundance, species) %>% 
+    mutate(inter_treat = factor(inter_treat, levels = c("Baseline.Fresh","After.Fresh","Baseline.Pasteurized",
+                                                        "After.Pasteurized","Baseline.FollowUp"))) %>% 
+    dplyr::left_join(dat_tax, by = "species")
+  
+})
+```
+
+
+# Changes on phylum level -- overall
+
+Let's analyze the changes of the five overall most abundant phyla.
+
+```{r general data preparation}
+# create a dataset with all taxonomic groupings in columns
+dat_tax <- tse %>% 
+  rowData() %>% 
+  as.data.frame() %>% 
+  mutate(species = row.names(.))
+row.names(dat_tax) <- NULL
+
+# create a dataset for matching the intervention and participant id variables to the samples
+dat_samples <- dat %>% 
+  select(participant_id, inter_treat) %>% 
+  mutate(sample = row.names(.))
+row.names(dat_samples) <- NULL
+
+# create one base dataset for all figures
+dat_relAbd <- tse %>% 
+  assay("relAbd") %>% 
+  as.data.frame() %>% 
+  mutate(species = row.names(.)) %>% 
+  pivot_longer(cols = -species, names_to = "sample", values_to = "relative_abundance") %>% 
+  dplyr::left_join(dat_samples, by = "sample") %>% 
+  mutate(inter_treat  = factor(inter_treat, levels = c("Baseline.Fresh","After.Fresh","Baseline.Pasteurized",
+                                                       "After.Pasteurized","Baseline.FollowUp")),
+         treatment    = case_when(grepl("Baseline", inter_treat) ~ "Baseline",
+                                  grepl("After",    inter_treat) ~ "After",
+                                  TRUE                           ~ NA_character_),
+         treatment    = factor(treatment, levels = c("Baseline", "After")),
+         intervention = case_when(grepl("Fresh",       inter_treat) ~ "Fresh",
+                                  grepl("Pasteurized", inter_treat) ~ "Pasteurized",
+                                  grepl("FollowUp",    inter_treat) ~ "FollowUp",
+                                  TRUE                              ~ NA_character_),
+         intervention = factor(intervention, levels = c("Fresh", "Pasteurized", "FollowUp"))) %>% 
+  select(participant_id, inter_treat, treatment, intervention, relative_abundance, species) %>% 
+  dplyr::left_join(dat_tax, by = "species")
+```
+
+```{r create a table}
+#| message: false
+
+# extract the five most common phyla
+phyla_vec <- dat_relAbd %>% 
+  group_by(phylum) %>% 
+  summarize(sum_relAbd = sum(relative_abundance, na.rm = TRUE)) %>% 
+  ungroup() %>% 
+  arrange(desc(sum_relAbd)) %>% 
+  dplyr::slice(1:5) %>% 
+  pull(phylum) %>% 
+  as.character()
+
+# restrict the data to these phyla, aggregate it and remove the follow-up measurements
+dat_relAbd_phylum <- dat_relAbd %>% 
+  filter(phylum %in% phyla_vec) %>% 
+  group_by(participant_id, inter_treat, phylum) %>% 
+  summarize(relative_abundance = sum(relative_abundance, na.rm = TRUE),
+            intervention       = first(intervention),
+            treatment          = first(treatment)) %>% 
+  ungroup() %>% 
+  filter(intervention != "FollowUp")
+
+# create plots and tables
+results_list <- lapply(phyla_vec, function(x) {
+  dat_relAbd_phylum %>% 
+    filter(phylum == x) %>% 
+    plot_crossoverBoxplots(y_var            = "relative_abundance",
+                           intervention_var = "intervention",
+                           t_var            = "treatment",
+                           subject_var      = "participant_id",
+                           title            = paste("Phylum", x))
+})
+
+# print plots and tables
+results_list[[1]]$ggplot_object
+results_list[[1]]$results_table %>% kable() %>% kable_styling()
+results_list[[2]]$ggplot_object
+results_list[[2]]$results_table %>% kable() %>% kable_styling()
+results_list[[3]]$ggplot_object
+results_list[[3]]$results_table %>% kable() %>% kable_styling()
+results_list[[4]]$ggplot_object
+results_list[[4]]$results_table %>% kable() %>% kable_styling()
+results_list[[5]]$ggplot_object
+results_list[[5]]$results_table %>% kable() %>% kable_styling()
+```
+
+
+# Changes on phylum level -- exemplaric participants 
+
+Each graphic only shows the top five most abundant bacteria species (reference:
+sum over all time points) and puts all other categories in the "Others" group.
+
+```{r general plots}
+#| message: false
+#| fig.width: 10
+
+# final preparation for the plot data
+plotDat_list <- lapply(seq_len(length(participants)), function(i) {
+  
+  dat_short <- datShort_list[[i]]
+  
+  # categorize less abundant bacteria groups into "Others"
+  tab_phylum <- dat_short %>% 
+    group_by(phylum) %>% 
+    summarize(sum_relAbd = sum(relative_abundance)) %>% 
+    ungroup() %>% 
+    arrange(desc(sum_relAbd))
+  
+  # aggregate the relative abundances per bacteria group
+  dat_short %>% 
+    mutate(phylum_cat = case_when(phylum %in% tab_phylum$phylum[1:5] ~ phylum,
+                                  TRUE                               ~ "Others")) %>% 
+    ungroup() %>% 
+    group_by(inter_treat, phylum_cat) %>% 
+    summarize(relative_abundance = sum(relative_abundance, na.rm = TRUE)) %>% 
+    ungroup() %>% 
+    mutate(phylum_cat = factor(phylum_cat, levels = rev(c(as.character(tab_phylum$phylum[1:5]), "Others"))))
+})
+
+
+# prepare plots
+gg_list <- lapply(seq_len(length(participants)), function(i) {
+  
+  dat_plot    <- plotDat_list[[i]]
+  participant <- participants[i]
+  
+  dat_plot %>% 
+    ggplot(aes(x = inter_treat, weight = relative_abundance, fill = phylum_cat)) +
+    geom_bar() +
+    geom_hline(yintercept = c(25,50,75), linetype = 2, col = "gray30") +
+    ggtitle("Verteilung der Bakterien nach Stämmen", subtitle = paste("Proband", participant)) +
+    scale_y_continuous(labels = function(x) { paste0(x, "%") }) +
+    theme(plot.title    = element_text(hjust = 0.5),
+          plot.subtitle = element_text(hjust = 0.5),
+          axis.title    = element_blank(),
+          legend.title  = element_blank(),
+          axis.text.x   = element_text(angle = 45, hjust = 1))
+  
+})
+
+
+# prepare tables
+tab_list <- lapply(seq_len(length(participants)), function(i) {
+  
+  plotDat_list[[i]] %>%
+    pivot_wider(values_from = "relative_abundance", id_cols = "phylum_cat", names_from = "inter_treat") %>% 
+    kable() %>% 
+    kable_styling()
+  
+})
+
+gg_list[[1]]
+tab_list[[1]]
+gg_list[[2]]
+tab_list[[2]]
+gg_list[[3]]
+tab_list[[3]]
+```

@@ -1,0 +1,294 @@
+---
+title: "Description Microbiome Changes with focus on generally interesting species"
+format:
+  html:
+    toc: true
+    code-fold: true
+    embed-resources: true
+---
+
+## Data preparation
+
+```{r packages}
+#| warning: false
+
+library(sauerkrautTaxonomyBuddy)
+library(SummarizedExperiment) # microbiome analysis
+
+library(dplyr)      # data handling
+library(tidyr)      # data transformation
+library(ggplot2)    # data visualization
+library(kableExtra) # table printing
+
+theme_set(theme_minimal()) # set ggplot2 theme
+```
+
+```{r set file paths}
+define_dataPaths()
+```
+
+```{r data preparation}
+#| warning: false
+
+tse <- readAndPrepare_mainTaxonomicData(path_groupInfoRdata               = path_groupInfoRdata,
+                                        path_participantRdata             = path_participantRdata,
+                                        path_samplesIDxlsx                = path_samplesIDxlsx,
+                                        path_dietInfoCsv                  = path_dietInfoCsv,
+                                        path_nutrientInfoCsv              = path_nutrientInfoCsv,
+                                        path_bloodMetabolomeXlsx          = path_bloodMetabolomeXlsx,
+                                        path_stoolMetabolomeXlsx          = path_stoolMetabolomeXlsx,
+                                        path_T4questXlsx                  = path_T4questXlsx,
+                                        path_stoolInfoXlsx                = path_stoolInfoXlsx,
+                                        path_bodyMeasuresXlsx             = path_bodyMeasuresXlsx,
+                                        path_absTaxonomyData              = path_absTaxonomyData,
+                                        path_relTaxonomyData              = path_relTaxonomyData,
+                                        path_sampleLookupXlsx             = path_sampleLookupXlsx,
+                                        path_krautLookupXlsx              = path_krautLookupXlsx,
+                                        path_bloodMarkerBostonRdata       = path_bloodMarkerBostonRdata,
+                                        path_bloodMarkerZentrallaborRdata = path_bloodMarkerZentrallaborRdata,
+                                        path_bloodMarkerBostonXlsx        = path_bloodMarkerBostonXlsx,
+                                        path_bloodMarkerZentrallaborXlsx  = path_bloodMarkerZentrallaborXlsx,
+                                        aggregation_level                 = "species",
+                                        exclude_rareStoolBacteria         = FALSE,
+                                        exclude_sickParticipants          = "no exclusion")
+
+dat <- tse %>% 
+  colData() %>% 
+  as.data.frame()
+```
+
+
+# Changes on Sauerkraut species level -- overall
+
+In the following there's one plot and table for each of the selected bacteria species.  
+The species are sorted from most common to least common (based on all our samples).
+
+```{r general data preparation}
+# create a dataset with all taxonomic groupings in columns
+dat_tax <- tse %>% 
+  rowData() %>% 
+  as.data.frame() %>% 
+  mutate(species = row.names(.))
+row.names(dat_tax) <- NULL
+
+# create a dataset for matching the intervention and participant id variables to the samples
+dat_samples <- dat %>% 
+  select(participant_id, inter_treat) %>% 
+  mutate(sample = row.names(.))
+row.names(dat_samples) <- NULL
+
+# create one base dataset for all figures
+dat_relAbd <- tse %>% 
+  assay("relAbd") %>% 
+  as.data.frame() %>% 
+  mutate(species = row.names(.)) %>% 
+  pivot_longer(cols = -species, names_to = "sample", values_to = "relative_abundance") %>% 
+  dplyr::left_join(dat_samples, by = "sample") %>% 
+  mutate(inter_treat  = factor(inter_treat, levels = c("Baseline.Fresh","After.Fresh","Baseline.Pasteurized",
+                                                       "After.Pasteurized","Baseline.FollowUp")),
+         treatment    = case_when(grepl("Baseline", inter_treat) ~ "Baseline",
+                                  grepl("After",    inter_treat) ~ "After",
+                                  TRUE                           ~ NA_character_),
+         treatment    = factor(treatment, levels = c("Baseline", "After")),
+         intervention = case_when(grepl("Fresh",       inter_treat) ~ "Fresh",
+                                  grepl("Pasteurized", inter_treat) ~ "Pasteurized",
+                                  grepl("FollowUp",    inter_treat) ~ "FollowUp",
+                                  TRUE                              ~ NA_character_),
+         intervention = factor(intervention, levels = c("Fresh", "Pasteurized", "FollowUp"))) %>% 
+  select(participant_id, inter_treat, treatment, intervention, relative_abundance, species) %>% 
+  dplyr::left_join(dat_tax, by = "species")
+```
+
+```{r further preparations}
+#| message: false
+
+# create a vector of the bacteria species appearing in our Sauerkraut samples
+species_vec <- c("Blautia_wexlerae",                 "Clostridia_bacterium",
+                 "Fusicatenibacter_saccharivorans",  "Ruminococcus_bromii",
+                 "Lachnospiraceae_bacterium",        "Anaerobutyricum_hallii",
+                 "Anaerostipes_hadrus",              "Eubacterium_rectale",
+                 "Collinsella_aerofaciens",          "Roseburia_faecis",
+                 "Gemmiger_formicilis",              "Candidatus_Cibiobacter_qucibialis",
+                 "Bifidobacterium_adolescentis",     "Dialister_invisus",
+                 "Prevotella_copri_clade_A",         "Streptococcus_dysgalactiae",
+                 "Prevotella_melaninogenica",        "Enorma_massiliensis",
+                 "Prevotella_multiformis",           "Enterococcus_cecorum",
+                 "Bacteroides_paurosaccharolyticus", "Faecalibacterium_prausnitzii",
+                 "Eubacterium_siraeum",              "Eubacterium_hallii")
+
+
+# sort these species by their abundance
+species_relAbd <- sapply(species_vec, function(x) {
+  dat_relAbd %>% 
+    filter(species == paste0("species:", x)) %>% 
+    pull(relative_abundance) %>% 
+    sum()
+}) %>% 
+  sort(decreasing = TRUE)
+
+# restrict the data to these species, aggregate it and remove the follow-up measurements
+dat_relAbd_species <- dat_relAbd %>% 
+  filter(species %in% paste0("species:", species_vec)) %>% 
+  group_by(participant_id, inter_treat, species) %>% 
+  summarize(relative_abundance = sum(relative_abundance, na.rm = TRUE),
+            intervention       = first(intervention),
+            treatment          = first(treatment)) %>% 
+  ungroup() %>% 
+  filter(intervention != "FollowUp")
+```
+
+
+```{r create results}
+#| message: false
+
+# create plots and tables
+results_list <- lapply(names(species_relAbd), function(x) {
+  if (!(paste0("species:", x) %in% dat_relAbd_species$species))
+    return(paste("Species", x, "is not appearing in the data."))
+  
+  # plot and development table
+  generalResults_list <- dat_relAbd_species %>% 
+    filter(species == paste0("species:", x)) %>% 
+    plot_crossoverBoxplots(y_var            = "relative_abundance",
+                           intervention_var = "intervention",
+                           t_var            = "treatment",
+                           subject_var      = "participant_id",
+                           title            = paste("Species", x),
+                           y_isRelAbundance = TRUE)
+  
+  # add the information how many samples had a relative abundance >= 0.01%
+  tab_0.01abundance <- dat_relAbd_species %>% 
+    filter(species == paste0("species:", x)) %>% 
+    group_by(intervention, treatment) %>% 
+    summarize(share_atLeast0.01percent = sum(relative_abundance >= 0.01) / n()) %>% 
+    mutate(share_atLeast0.01percent = paste0(round(100 * share_atLeast0.01percent, 1), "%"))
+  
+  list(ggplot_object     = generalResults_list$ggplot_object,
+       results_table     = generalResults_list$results_table,
+       tab_0.01abundance = tab_0.01abundance)
+})
+```
+
+
+```{r print results}
+# print plots and tables
+results_list[[1]]$ggplot_object
+results_list[[1]]$results_table %>% select(intervention, contains("share"))                       %>% kable() %>% kable_styling()
+results_list[[1]]$results_table %>% select(intervention, contains("median"), -contains("Factor")) %>% kable() %>% kable_styling()
+results_list[[1]]$results_table %>% select(intervention, contains("Factor"))                      %>% kable() %>% kable_styling()
+results_list[[1]]$tab_0.01abundance %>% kable() %>% kable_styling()
+
+results_list[[2]]$ggplot_object
+results_list[[2]]$results_table %>% select(intervention, contains("share"))                       %>% kable() %>% kable_styling()
+results_list[[2]]$results_table %>% select(intervention, contains("median"), -contains("Factor")) %>% kable() %>% kable_styling()
+results_list[[2]]$results_table %>% select(intervention, contains("Factor"))                      %>% kable() %>% kable_styling()
+results_list[[2]]$tab_0.01abundance %>% kable() %>% kable_styling()
+
+results_list[[3]]$ggplot_object
+results_list[[3]]$results_table %>% select(intervention, contains("share"))                       %>% kable() %>% kable_styling()
+results_list[[3]]$results_table %>% select(intervention, contains("median"), -contains("Factor")) %>% kable() %>% kable_styling()
+results_list[[3]]$results_table %>% select(intervention, contains("Factor"))                      %>% kable() %>% kable_styling()
+results_list[[3]]$tab_0.01abundance %>% kable() %>% kable_styling()
+
+results_list[[4]]$ggplot_object
+results_list[[4]]$results_table %>% select(intervention, contains("share"))                       %>% kable() %>% kable_styling()
+results_list[[4]]$results_table %>% select(intervention, contains("median"), -contains("Factor")) %>% kable() %>% kable_styling()
+results_list[[4]]$results_table %>% select(intervention, contains("Factor"))                      %>% kable() %>% kable_styling()
+results_list[[4]]$tab_0.01abundance %>% kable() %>% kable_styling()
+
+results_list[[5]]$ggplot_object
+results_list[[5]]$results_table %>% select(intervention, contains("share"))                       %>% kable() %>% kable_styling()
+results_list[[5]]$results_table %>% select(intervention, contains("median"), -contains("Factor")) %>% kable() %>% kable_styling()
+results_list[[5]]$results_table %>% select(intervention, contains("Factor"))                      %>% kable() %>% kable_styling()
+results_list[[5]]$tab_0.01abundance %>% kable() %>% kable_styling()
+
+results_list[[6]]$ggplot_object
+results_list[[6]]$results_table %>% select(intervention, contains("share"))                       %>% kable() %>% kable_styling()
+results_list[[6]]$results_table %>% select(intervention, contains("median"), -contains("Factor")) %>% kable() %>% kable_styling()
+results_list[[6]]$results_table %>% select(intervention, contains("Factor"))                      %>% kable() %>% kable_styling()
+results_list[[6]]$tab_0.01abundance %>% kable() %>% kable_styling()
+
+results_list[[7]]$ggplot_object
+results_list[[7]]$results_table %>% select(intervention, contains("share"))                       %>% kable() %>% kable_styling()
+results_list[[7]]$results_table %>% select(intervention, contains("median"), -contains("Factor")) %>% kable() %>% kable_styling()
+results_list[[7]]$results_table %>% select(intervention, contains("Factor"))                      %>% kable() %>% kable_styling()
+results_list[[7]]$tab_0.01abundance %>% kable() %>% kable_styling()
+
+results_list[[8]]$ggplot_object
+results_list[[8]]$results_table %>% select(intervention, contains("share"))                       %>% kable() %>% kable_styling()
+results_list[[8]]$results_table %>% select(intervention, contains("median"), -contains("Factor")) %>% kable() %>% kable_styling()
+results_list[[8]]$results_table %>% select(intervention, contains("Factor"))                      %>% kable() %>% kable_styling()
+results_list[[8]]$tab_0.01abundance %>% kable() %>% kable_styling()
+
+results_list[[9]]$ggplot_object
+results_list[[9]]$results_table %>% select(intervention, contains("share"))                       %>% kable() %>% kable_styling()
+results_list[[9]]$results_table %>% select(intervention, contains("median"), -contains("Factor")) %>% kable() %>% kable_styling()
+results_list[[9]]$results_table %>% select(intervention, contains("Factor"))                      %>% kable() %>% kable_styling()
+results_list[[9]]$tab_0.01abundance %>% kable() %>% kable_styling()
+
+results_list[[10]]$ggplot_object
+results_list[[10]]$results_table %>% select(intervention, contains("share"))                       %>% kable() %>% kable_styling()
+results_list[[10]]$results_table %>% select(intervention, contains("median"), -contains("Factor")) %>% kable() %>% kable_styling()
+results_list[[10]]$results_table %>% select(intervention, contains("Factor"))                      %>% kable() %>% kable_styling()
+results_list[[10]]$tab_0.01abundance %>% kable() %>% kable_styling()
+
+results_list[[11]]$ggplot_object
+results_list[[11]]$results_table %>% select(intervention, contains("share"))                       %>% kable() %>% kable_styling()
+results_list[[11]]$results_table %>% select(intervention, contains("median"), -contains("Factor")) %>% kable() %>% kable_styling()
+results_list[[11]]$results_table %>% select(intervention, contains("Factor"))                      %>% kable() %>% kable_styling()
+results_list[[11]]$tab_0.01abundance %>% kable() %>% kable_styling()
+
+results_list[[12]]$ggplot_object
+results_list[[12]]$results_table %>% select(intervention, contains("share"))                       %>% kable() %>% kable_styling()
+results_list[[12]]$results_table %>% select(intervention, contains("median"), -contains("Factor")) %>% kable() %>% kable_styling()
+results_list[[12]]$results_table %>% select(intervention, contains("Factor"))                      %>% kable() %>% kable_styling()
+results_list[[12]]$tab_0.01abundance %>% kable() %>% kable_styling()
+
+results_list[[13]]$ggplot_object
+results_list[[13]]$results_table %>% select(intervention, contains("share"))                       %>% kable() %>% kable_styling()
+results_list[[13]]$results_table %>% select(intervention, contains("median"), -contains("Factor")) %>% kable() %>% kable_styling()
+results_list[[13]]$results_table %>% select(intervention, contains("Factor"))                      %>% kable() %>% kable_styling()
+results_list[[13]]$tab_0.01abundance %>% kable() %>% kable_styling()
+
+results_list[[14]]$ggplot_object
+results_list[[14]]$results_table %>% select(intervention, contains("share"))                       %>% kable() %>% kable_styling()
+results_list[[14]]$results_table %>% select(intervention, contains("median"), -contains("Factor")) %>% kable() %>% kable_styling()
+results_list[[14]]$results_table %>% select(intervention, contains("Factor"))                      %>% kable() %>% kable_styling()
+results_list[[14]]$tab_0.01abundance %>% kable() %>% kable_styling()
+
+results_list[[15]]$ggplot_object
+results_list[[15]]$results_table %>% select(intervention, contains("share"))                       %>% kable() %>% kable_styling()
+results_list[[15]]$results_table %>% select(intervention, contains("median"), -contains("Factor")) %>% kable() %>% kable_styling()
+results_list[[15]]$results_table %>% select(intervention, contains("Factor"))                      %>% kable() %>% kable_styling()
+results_list[[15]]$tab_0.01abundance %>% kable() %>% kable_styling()
+
+results_list[[16]]$ggplot_object
+results_list[[16]]$results_table %>% select(intervention, contains("share"))                       %>% kable() %>% kable_styling()
+results_list[[16]]$results_table %>% select(intervention, contains("median"), -contains("Factor")) %>% kable() %>% kable_styling()
+results_list[[16]]$results_table %>% select(intervention, contains("Factor"))                      %>% kable() %>% kable_styling()
+results_list[[16]]$tab_0.01abundance %>% kable() %>% kable_styling()
+
+results_list[[17]]$ggplot_object
+results_list[[17]]$results_table %>% select(intervention, contains("share"))                       %>% kable() %>% kable_styling()
+results_list[[17]]$results_table %>% select(intervention, contains("median"), -contains("Factor")) %>% kable() %>% kable_styling()
+results_list[[17]]$results_table %>% select(intervention, contains("Factor"))                      %>% kable() %>% kable_styling()
+results_list[[17]]$tab_0.01abundance %>% kable() %>% kable_styling()
+
+results_list[[18]]$ggplot_object
+results_list[[18]]$results_table %>% select(intervention, contains("share"))                       %>% kable() %>% kable_styling()
+results_list[[18]]$results_table %>% select(intervention, contains("median"), -contains("Factor")) %>% kable() %>% kable_styling()
+results_list[[18]]$results_table %>% select(intervention, contains("Factor"))                      %>% kable() %>% kable_styling()
+results_list[[18]]$tab_0.01abundance %>% kable() %>% kable_styling()
+
+results_list[[19]]$ggplot_object
+results_list[[19]]$results_table %>% select(intervention, contains("share"))                       %>% kable() %>% kable_styling()
+results_list[[19]]$results_table %>% select(intervention, contains("median"), -contains("Factor")) %>% kable() %>% kable_styling()
+results_list[[19]]$results_table %>% select(intervention, contains("Factor"))                      %>% kable() %>% kable_styling()
+results_list[[19]]$tab_0.01abundance %>% kable() %>% kable_styling()
+
+results_list[[20]]
+results_list[[21]]
+results_list[[22]]
+results_list[[23]]
+results_list[[24]]
+```
