@@ -1,0 +1,281 @@
+---
+title: "How to use sauerkrautTaxonomyBuddy"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{HowToUseSauerkrautBuddy}
+  %\VignetteEncoding{UTF-8}
+  %\VignetteEngine{knitr::rmarkdown}
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r setup}
+#| warning: false
+
+library(sauerkrautTaxonomyBuddy)
+library(mia)                  # microbiome analysis
+library(SummarizedExperiment) # microbiome analysis
+library(scater)               # dimension reduction
+
+library(dplyr) # data handling
+
+# set ggplot theme
+theme_set(theme_minimal())
+```
+
+```{r set file paths}
+define_dataPaths()
+```
+
+## Main functions for taxonomic analysis
+
+### Create a tse object from all taxonomic analysis data files
+
+```{r}
+tse <- readAndPrepare_mainTaxonomicData(path_groupInfoRdata               = path_groupInfoRdata,
+                                        path_participantRdata             = path_participantRdata,
+                                        path_samplesIDxlsx                = path_samplesIDxlsx,
+                                        path_dietInfoCsv                  = path_dietInfoCsv,
+                                        path_nutrientInfoCsv              = path_nutrientInfoCsv,
+                                        path_bloodMetabolomeXlsx          = path_bloodMetabolomeXlsx,
+                                        path_stoolMetabolomeXlsx          = path_stoolMetabolomeXlsx,
+                                        path_T4questXlsx                  = path_T4questXlsx,
+                                        path_stoolInfoXlsx                = path_stoolInfoXlsx,
+                                        path_bodyMeasuresXlsx             = path_bodyMeasuresXlsx,
+                                        path_absTaxonomyData              = path_absTaxonomyData,
+                                        path_relTaxonomyData              = path_relTaxonomyData,
+                                        path_sampleLookupXlsx             = path_sampleLookupXlsx,
+                                        path_krautLookupXlsx              = path_krautLookupXlsx,
+                                        path_bloodMarkerBostonRdata       = path_bloodMarkerBostonRdata,
+                                        path_bloodMarkerZentrallaborRdata = path_bloodMarkerZentrallaborRdata,
+                                        path_bloodMarkerBostonXlsx        = path_bloodMarkerBostonXlsx,
+                                        path_bloodMarkerZentrallaborXlsx  = path_bloodMarkerZentrallaborXlsx,
+                                        aggregation_level                 = "species",
+                                        exclude_sickParticipants          = "taxonomy paper")
+
+# add further features to colData(tse)
+tse <- tse_addTaxaFeatures(tse          = tse,
+                           assay_relAbd = "relAbd")
+
+
+# how to access the individual components of the data object:
+# 1. absolute abundances
+assay(tse, "absAbd")
+# 2. relative abundances
+assay(tse, "relAbd")
+# 3. basic experiment and subject data on each sample, and calculated statistics
+colData(tse)
+# 4. taxonomic tree information for each bacteria species / strain
+rowData(tse)
+```
+
+
+### Calculate Bray-Curtis and UniFrac distances
+
+```{r}
+datDist_list <- calculate_distances(tse, "relAbd")
+```
+
+
+### Crossover design boxplots
+
+```{r}
+dat_crossoverPlots <- tse %>% colData() %>% as.data.frame() %>% 
+  filter(timepoint != "T5")
+
+plot_crossoverBoxplots(dat              = dat_crossoverPlots,
+                       y_var            = "richness_observed",
+                       intervention_var = "intervention",
+                       t_var            = "treatment",
+                       subject_var      = "participant_id",
+                       title            = "Observed richness index")
+```
+
+
+### Dimension reduction plots
+
+```{r}
+#| warning: false
+
+# estimate UMAP as a dimension reduction technique
+tse <- tse %>% scater::runUMAP(name = "UMAP", exprs_values = "relAbd")
+
+# create plot list
+gg_list <- plot_dimReduction(tse               = tse,
+                             dimReduction_name = "UMAP",
+                             assay             = "relAbd",
+                             taxRank_dominance = "family")
+
+# one exemplaric plot
+gg_list$gg_interventionTimes
+```
+
+
+
+## Main functions for functional analysis data
+
+### Create a tse object from all functional analysis pathway data files
+
+```{r}
+tse_PW <- readAndPrepare_mainFunctionalPathwayData(
+  path_KEGG_KO                      = path_KEGGKO_funData,
+  path_KEGG_pathways                = path_KEGGPathways_funData,
+  path_groupInfoRdata               = path_groupInfoRdata,
+  path_participantRdata             = path_participantRdata,
+  path_samplesIDxlsx                = path_samplesIDxlsx,
+  path_dietInfoCsv                  = path_dietInfoCsv,
+  path_nutrientInfoCsv              = path_nutrientInfoCsv,
+  path_bloodMetabolomeXlsx          = path_bloodMetabolomeXlsx,
+  path_stoolMetabolomeXlsx          = path_stoolMetabolomeXlsx,
+  path_T4questXlsx                  = path_T4questXlsx,
+  path_stoolInfoXlsx                = path_stoolInfoXlsx,
+  path_bodyMeasuresXlsx             = path_bodyMeasuresXlsx,
+  path_sampleLookupXlsx             = path_sampleLookupXlsx,
+  path_krautLookupXlsx              = path_krautLookupXlsx,
+  path_bloodMarkerBostonRdata       = path_bloodMarkerBostonRdata,
+  path_bloodMarkerZentrallaborRdata = path_bloodMarkerZentrallaborRdata,
+  path_bloodMarkerBostonXlsx        = path_bloodMarkerBostonXlsx,
+  path_bloodMarkerZentrallaborXlsx  = path_bloodMarkerZentrallaborXlsx,
+  exclude_sickParticipants          = "taxonomy paper"
+)
+
+
+# how to access the individual components of the data object:
+# 1. absolute abundances
+assay(tse_PW, "tpmAbd")
+# 2. relative abundances
+assay(tse_PW, "relAbd")
+# 3. basic experiment and subject data on each sample, and calculated statistics
+colData(tse_PW)
+# 4. pathway information for each function
+rowData(tse_PW)
+```
+
+
+### Create a tse object from all functional analysis KO data files
+
+```{r}
+tse_KO <- readAndPrepare_mainFunctionalKOdata(
+  path_KEGG_KO                      = path_KEGGKO_funData,
+  path_KEGG_pathways                = path_KEGGPathways_funData,
+  path_groupInfoRdata               = path_groupInfoRdata,
+  path_participantRdata             = path_participantRdata,
+  path_samplesIDxlsx                = path_samplesIDxlsx,
+  path_dietInfoCsv                  = path_dietInfoCsv,
+  path_nutrientInfoCsv              = path_nutrientInfoCsv,
+  path_bloodMetabolomeXlsx          = path_bloodMetabolomeXlsx,
+  path_stoolMetabolomeXlsx          = path_stoolMetabolomeXlsx,
+  path_T4questXlsx                  = path_T4questXlsx,
+  path_stoolInfoXlsx                = path_stoolInfoXlsx,
+  path_bodyMeasuresXlsx             = path_bodyMeasuresXlsx,
+  path_sampleLookupXlsx             = path_sampleLookupXlsx,
+  path_krautLookupXlsx              = path_krautLookupXlsx,
+  path_bloodMarkerBostonRdata       = path_bloodMarkerBostonRdata,
+  path_bloodMarkerZentrallaborRdata = path_bloodMarkerZentrallaborRdata,
+  path_bloodMarkerBostonXlsx        = path_bloodMarkerBostonXlsx,
+  path_bloodMarkerZentrallaborXlsx  = path_bloodMarkerZentrallaborXlsx,
+  exclude_sickParticipants          = "taxonomy paper"
+)
+
+
+# how to access the individual components of the data object:
+# 1. absolute abundances
+assay(tse_KO, "tpmAbd")
+# 2. relative abundances
+assay(tse_KO, "relAbd")
+# 3. basic experiment and subject data on each sample, and calculated statistics
+colData(tse_KO)
+# 4. KO information
+rowData(tse_KO)
+```
+
+
+
+## Functions for reading individual datasets
+
+### Basic experiment data
+
+```{r}
+dat_exp <- readAndPrepare_experimentData(path_groupInfoRdata      = path_groupInfoRdata,
+                                         path_participantRdata    = path_participantRdata,
+                                         path_samplesIDxlsx       = path_samplesIDxlsx,
+                                         path_dietInfoCsv         = path_dietInfoCsv,
+                                         path_nutrientInfoCsv     = path_nutrientInfoCsv,
+                                         path_bloodMetabolomeXlsx = path_bloodMetabolomeXlsx,
+                                         path_stoolMetabolomeXlsx = path_stoolMetabolomeXlsx,
+                                         path_T4questXlsx         = path_T4questXlsx,
+                                         path_stoolInfoXlsx       = path_stoolInfoXlsx,
+                                         path_bodyMeasuresXlsx    = path_bodyMeasuresXlsx,
+                                         path_sampleLookupXlsx    = path_sampleLookupXlsx,
+                                         path_krautLookupXlsx     = path_krautLookupXlsx,
+                                         exclude_sickParticipants = "taxonomy paper")
+
+dat_lookupList <- readAndPrepare_lookupData(path_sampleLookupXlsx    = path_sampleLookupXlsx,
+                                            path_krautLookupXlsx     = path_krautLookupXlsx,
+                                            exclude_sickParticipants = "taxonomy paper")
+dat_lookupStoolTax <- datList_tax$dat_lookupStool
+dat_lookupKrautTax <- datList_tax$dat_lookupKraut
+rm(dat_lookupList)
+```
+
+
+### Symptom diary data
+
+```{r}
+dat_symp <- readAndPrepare_symptomDiaries(path_symptomDiaryData)
+```
+
+
+### Taxonomy data
+
+```{r}
+datList_tax <- readAndPrepare_taxonomy(path_taxonomyData         = path_relTaxonomyData,
+                                       path_sampleLookupXlsx     = path_sampleLookupXlsx,
+                                       path_krautLookupXlsx      = path_krautLookupXlsx,
+                                       aggregation_level         = "species",
+                                       exclude_sickParticipants  = "taxonomy paper")
+dat_stoolTax       <- datList_tax$dat_stoolSamples
+dat_stoolDuplTax   <- datList_tax$dat_stoolDuplicateSamples
+dat_krautTax       <- datList_tax$dat_krautSamples
+dat_lookupStoolTax <- datList_tax$dat_lookupStool
+dat_lookupKrautTax <- datList_tax$dat_lookupKraut
+rm(datList_tax)
+```
+
+
+### Functional analysis data
+
+```{r}
+# prepare relative abundances
+datList_fun <- readAndPrepare_functionalData(path_KEGG_KO             = path_KEGGKO_funData,
+                                             path_KEGG_pathways       = path_KEGGPathways_funData,
+                                             path_sampleLookupXlsx    = path_sampleLookupXlsx,
+                                             path_krautLookupXlsx     = path_krautLookupXlsx,
+                                             abundance_unit           = "TPM",
+                                             exclude_sickParticipants = "taxonomy paper")
+dat_funKO_stoolSamples <- datList_fun$datKO_stoolSamples
+dat_funPW_stoolSamples <- datList_fun$datPathways_stoolSamples
+```
+
+
+### Blood marker data
+
+```{r}
+datList_blood <- readAndPrepare_bloodMarkerData(path_bloodMarkerBostonRdata       = path_bloodMarkerBostonRdata,
+                                                path_bloodMarkerZentrallaborRdata = path_bloodMarkerZentrallaborRdata,
+                                                path_bloodMarkerBostonXlsx        = path_bloodMarkerBostonXlsx,
+                                                path_bloodMarkerZentrallaborXlsx  = path_bloodMarkerZentrallaborXlsx,
+                                                path_sampleLookupXlsx             = path_sampleLookupXlsx,
+                                                path_krautLookupXlsx              = path_krautLookupXlsx,
+                                                exclude_sickParticipants          = "taxonomy paper")
+dat_blood            <- datList_blood$main_data
+dat_blood_BostonDupl <- datList_blood$duplicates_BostonData
+dat_blood_zlDupl     <- datList_blood$duplicates_ZentrallaborData
+```
