@@ -1629,56 +1629,49 @@ gg_exp_bmiInt
 ```
 
 
-# Corrected p-values for intervention effects
+# Final results preparation
 
-Correct for multiple testing by applying the Benjamini-Hochberg correction to all intervention effects.
+##### Main intervention effects
 
 ```{r}
 res <- results_dat %>% 
   filter(grepl("intervention", parameter)) %>% 
-  mutate(pvalue_corrected   = p.adjust(pvalue, method = "BH") %>% round(4),
-         pvalue_significant = ifelse(pvalue_corrected < 0.1, "yes", "no"))
+  mutate(pvalue_significant = ifelse(pvalue < 0.05, "yes", "no"))
 
 res %>% 
-  select(model, model_type, parameter, pvalue_corrected, pvalue_significant) %>% 
+  select(model, model_type, parameter, pvalue, pvalue_significant) %>% 
   kable() %>% 
   kable_styling()
 ```
 
 
-# Corrected p-values for interaction effects
-
-For the interaction effects, correct for multiple testing by applying the Benjamini-Hochberg correction.
-The correction is applied individually, once for the sex / the age / the BMI interaction models.
+##### Interaction effects
 
 ```{r}
 # sex
 results_dat_sexInt <- results_dat_sexInt %>% 
-  mutate(pvalue_corrected   = p.adjust(pvalue, method = "BH") %>% round(4),
-         pvalue_significant = ifelse(pvalue_corrected < 0.1, "yes", "no"))
+  mutate(pvalue_significant = ifelse(pvalue < 0.05, "yes", "no"))
 
 results_dat_sexInt %>% 
-  select(model, model_type, gender, parameter, pvalue_corrected, pvalue_significant) %>% 
+  select(model, model_type, gender, parameter, pvalue, pvalue_significant) %>% 
   kable() %>% 
   kable_styling()
 
 # age
 results_dat_ageInt <- results_dat_ageInt %>% 
-  mutate(pvalue_corrected   = p.adjust(pvalue, method = "BH") %>% round(4),
-         pvalue_significant = ifelse(pvalue_corrected < 0.1, "yes", "no"))
+  mutate(pvalue_significant = ifelse(pvalue < 0.05, "yes", "no"))
 
 results_dat_ageInt %>% 
-  select(model, model_type, age_group, parameter, pvalue_corrected, pvalue_significant) %>% 
+  select(model, model_type, age_group, parameter, pvalue, pvalue_significant) %>% 
   kable() %>% 
   kable_styling()
 
 # BMI
 results_dat_bmiInt <- results_dat_bmiInt %>% 
-  mutate(pvalue_corrected   = p.adjust(pvalue, method = "BH") %>% round(4),
-         pvalue_significant = ifelse(pvalue_corrected < 0.1, "yes", "no"))
+  mutate(pvalue_significant = ifelse(pvalue < 0.05, "yes", "no"))
 
 results_dat_bmiInt %>% 
-  select(model, model_type, bmi_group, parameter, pvalue_corrected, pvalue_significant) %>% 
+  select(model, model_type, bmi_group, parameter, pvalue, pvalue_significant) %>% 
   kable() %>% 
   kable_styling()
 ```
@@ -2031,7 +2024,7 @@ plot_dat_bloodExp <- results_dat %>%
          model     = droplevels(model),
          model_xCoord = case_when(is.na(xCoord_shift) ~ models_xCoords[["non-Gaussian"]][as.character(model)],
                                   TRUE                ~ models_xCoords[["non-Gaussian"]][as.character(model)] + xCoord_shift))
-plot_dat_bloodExp_signif <- plot_dat_bloodExp %>% filter(pvalue_corrected < 0.1)
+plot_dat_bloodExp_signif <- plot_dat_bloodExp %>% filter(pvalue < 0.05)
 
 
 ### plots
@@ -2136,11 +2129,11 @@ gg_bloodExp <- plot_dat_bloodExp %>%
   geom_hline(yintercept = 1, linetype = 2, col = "gray35") +
   geom_linerange(aes(ymin = exp_CIlower, ymax = exp_CIupper, alpha = param_type2)) +
   geom_point(aes(shape = param_type, size = param_type2)) +
-  geom_point(data = plot_dat_bloodExp_signif, aes(y = 1.6), shape = 4, size = 2.5, stroke = 2, show.legend = FALSE) +
+  # geom_point(data = plot_dat_bloodExp_signif, aes(y = 1.6), shape = 4, size = 2.5, stroke = 2, show.legend = FALSE) +
   ggtitle("log Gaussian & Gamma models", "Blood measurements") +
   scale_x_continuous(breaks = unname(models_xCoords[["non-Gaussian"]]), labels = names(models_xCoords[["non-Gaussian"]]),
                      limits = ylim_exp) +
-  scale_y_continuous("estimate, on log2 scale", trans = "log2", limits = c(.6,1.6),
+  scale_y_continuous("estimate, on log2 scale", trans = "log2", limits = c(.6,1.5),
                      breaks = c(.8, 1, 1.2),
                      labels = c("-20%", "0", "+20%"),
                      minor_breaks = c(.6, 1.4)) +
@@ -2193,10 +2186,14 @@ GG
 (gg_titleGaussian + gg_titleExp + gg_bloodGaussian + gg_bloodExp + gg_stoolGaussian + gg_stoolExp + guide_area()) +
   patchwork::plot_layout(nrow = 3, ncol = 2, widths = c(.35,.65), heights = c(.01, 1, 1),
                          axis_titles = "collect", guides = "collect", design = layout)
-# ggsave("Figure4_bloodAndStoolSCFAmodels.png", width = 12, height = 6)
+ggsave("Figure4_bloodAndStoolSCFAmodels.png", width = 12, height = 6)
 ```
 
 ```{r}
+#| column: page
+#| fig-width: 12
+#| fig-height: 8
+
 # alternatively, same plot including titles
 
 # separate the plot title and the facet titles to plot it in a fancy version all above both plots

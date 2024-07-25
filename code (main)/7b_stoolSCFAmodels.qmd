@@ -1627,56 +1627,49 @@ gg_exp_bmiInt
 ```
 
 
-# Corrected p-values for intervention effects
+# Final results preparation
 
-Correct for multiple testing by applying the Benjamini-Hochberg correction to all intervention effects.
+##### Main intervention effects
 
 ```{r}
 results_dat_interventions <- results_dat %>% 
   filter(grepl("intervention", parameter)) %>% 
-  mutate(pvalue_corrected   = p.adjust(pvalue, method = "BH") %>% round(4),
-         pvalue_significant = ifelse(pvalue_corrected < 0.1, "yes", "no"))
+  mutate(pvalue_significant = ifelse(pvalue < 0.05, "yes", "no"))
 
 results_dat_interventions %>% 
-  select(model, model_type, parameter, pvalue_corrected, pvalue_significant) %>% 
+  select(model, model_type, parameter, pvalue, pvalue_significant) %>% 
   kable() %>% 
   kable_styling()
 ```
 
 
-# Corrected p-values for interaction effects
-
-For the interaction effects, correct for multiple testing by applying the Benjamini-Hochberg correction.
-The correction is applied individually, once for the sex / the age / the BMI interaction models.
+##### Interaction effects
 
 ```{r}
 # sex
 results_dat_sexInt <- results_dat_sexInt %>% 
-  mutate(pvalue_corrected   = p.adjust(pvalue, method = "BH") %>% round(4),
-         pvalue_significant = ifelse(pvalue_corrected < 0.1, "yes", "no"))
+  mutate(pvalue_significant = ifelse(pvalue < 0.05, "yes", "no"))
 
 results_dat_sexInt %>% 
-  select(model, model_type, gender, parameter, pvalue_corrected, pvalue_significant) %>% 
+  select(model, model_type, gender, parameter, pvalue, pvalue_significant) %>% 
   kable() %>% 
   kable_styling()
 
 # age
 results_dat_ageInt <- results_dat_ageInt %>% 
-  mutate(pvalue_corrected   = p.adjust(pvalue, method = "BH") %>% round(4),
-         pvalue_significant = ifelse(pvalue_corrected < 0.1, "yes", "no"))
+  mutate(pvalue_significant = ifelse(pvalue < 0.05, "yes", "no"))
 
 results_dat_ageInt %>% 
-  select(model, model_type, age_group, parameter, pvalue_corrected, pvalue_significant) %>% 
+  select(model, model_type, age_group, parameter, pvalue, pvalue_significant) %>% 
   kable() %>% 
   kable_styling()
 
 # BMI
 results_dat_bmiInt <- results_dat_bmiInt %>% 
-  mutate(pvalue_corrected   = p.adjust(pvalue, method = "BH") %>% round(4),
-         pvalue_significant = ifelse(pvalue_corrected < 0.1, "yes", "no"))
+  mutate(pvalue_significant = ifelse(pvalue < 0.05, "yes", "no"))
 
 results_dat_bmiInt %>% 
-  select(model, model_type, bmi_group, parameter, pvalue_corrected, pvalue_significant) %>% 
+  select(model, model_type, bmi_group, parameter, pvalue, pvalue_significant) %>% 
   kable() %>% 
   kable_styling()
 ```
@@ -1689,10 +1682,10 @@ results_dat_bmiInt %>%
 #| fig-width: 16
 
 # save the results datasets, to be able to jointly plot blood and stool results in the blood document
-# write.csv(results_dat, file = "9_resultsDat_stoolSCFAmodels.csv", row.names = FALSE)
-# write.csv(results_dat_ageInt, file = "9_resultsDat_ageInt_stoolSCFAmodels.csv", row.names = FALSE)
-# write.csv(results_dat_sexInt, file = "9_resultsDat_sexInt_stoolSCFAmodels.csv", row.names = FALSE)
-# write.csv(results_dat_bmiInt, file = "9_resultsDat_bmiInt_stoolSCFAmodels.csv", row.names = FALSE)
+# write.csv(results_dat, file = "7b_resultsDat_stoolSCFAmodels.csv", row.names = FALSE)
+# write.csv(results_dat_ageInt, file = "7b_resultsDat_ageInt_stoolSCFAmodels.csv", row.names = FALSE)
+# write.csv(results_dat_sexInt, file = "7b_resultsDat_sexInt_stoolSCFAmodels.csv", row.names = FALSE)
+# write.csv(results_dat_bmiInt, file = "7b_resultsDat_bmiInt_stoolSCFAmodels.csv", row.names = FALSE)
 
 # 1) main model results
 (gg_gaussian + gg_exp) + patchwork::plot_layout(nrow = 1, widths = c(.33,.67))
