@@ -1135,8 +1135,10 @@ dat_plot <- data.frame(SCFA         = rep(dat_SCFAsignif$SCFA,  times = 2),
                        effect       = c(dat_SCFAsignif$freshInt_effect, dat_SCFAsignif$pastInt_effect),
                        pvalue       = c(dat_SCFAsignif$freshInt_pvalue, dat_SCFAsignif$pastInt_pvalue)) %>% 
   arrange(SCFA, desc(effect)) %>% 
-  mutate(pvalue_signif = case_when((pvalue < 0.05) & (intervention == "Fresh intervention") ~ "significant (fresh intervention)",
-                                   pvalue < 0.05 ~ "significant (pasteurized intervention)",
+  mutate(pvalue_signif = case_when((pvalue < 0.05) & grepl("Fresh", intervention) & (effect > 0) ~ "significant pos. effect (fresh intervention)",
+                                   (pvalue < 0.05) & grepl("Fresh", intervention) & (effect < 0) ~ "significant neg. effect (fresh intervention)",
+                                   (pvalue < 0.05) & (effect > 0) ~ "significant pos. effect (pasteurized intervention)",
+                                   (pvalue < 0.05) & (effect < 0) ~ "significant neg. effect (pasteurized intervention)",
                                    TRUE          ~ "not significant"),
          effect_label  = case_when((model == "Gaussian") & (effect >= 1)        ~ paste0("+", round(effect, 0), " TPM"),
                                    (model == "Gaussian") & (effect >= 0.1)      ~ paste0("+", round(effect, 1), " TPM"),
@@ -1175,8 +1177,14 @@ dat_plot_list <- lapply(as.character(unique(dat_plot$gene)), function(gen) {
                                                           TRUE ~ paste0(round(dat_gene$baseline_medianTPMAbd, 0), " TPM"))))
 })
 dat_plot <- dat_plot_list %>% dplyr::bind_rows() %>% 
-  mutate(gene         = factor(gene, levels = rev(unique(gene))),
-         intervention = factor(intervention, levels = c("Baseline median TPM abd.", "Fresh intervention", "Pasteurized intervention")))
+  mutate(gene          = factor(gene, levels = rev(unique(gene))),
+         intervention  = factor(intervention, levels = c("Baseline median TPM abd.", "Fresh intervention", "Pasteurized intervention")),
+         pvalue_signif = factor(pvalue_signif, levels = c("not significant",
+                                                          "significant pos. effect (fresh intervention)",
+                                                          "significant neg. effect (fresh intervention)",
+                                                          "significant pos. effect (pasteurized intervention)",
+                                                          "significant neg. effect (pasteurized intervention)",
+                                                          "")))
 
 # plot
 dat_plot %>% 
@@ -1184,8 +1192,10 @@ dat_plot %>%
   geom_tile(aes(fill = pvalue_signif)) +
   geom_text(aes(label = effect_label)) +
   scale_fill_manual("uncorrected p-value", values = c("not significant" = "gray95",
-                                                      "significant (fresh intervention)" = "#1F78B4",
-                                                      "significant (pasteurized intervention)" = "#FF7F00"),
+                                                      "significant pos. effect (fresh intervention)" = "#7cbde9",
+                                                      "significant neg. effect (fresh intervention)" = "#1F78B4",
+                                                      "significant pos. effect (pasteurized intervention)" = "#ffb366",
+                                                      "significant neg. effect (pasteurized intervention)" = "#FF7F00"),
                     na.value = "white") +
   facet_grid(rows = vars(SCFA), scales = "free", space = "free") +
   ggtitle("Intervention effects on SCFA-related genes") +
@@ -1388,8 +1398,10 @@ dat_plot <- data.frame(SCFA          = rep(dat_signif$SCFA,  times = 4),
                                          dat_signif$pastInt_ageLow_pvalue,  dat_signif$pastInt_ageHigh_pvalue),
                        pastEffect_forSorting = rep(dat_signif$pastInt_ageLow_effect, times = 4)) %>% 
   arrange(SCFA, desc(pastEffect_forSorting)) %>% 
-  mutate(pvalue_signif = case_when((pvalue < 0.05) & grepl("Fresh", intervention) ~ "significant (fresh intervention)",
-                                   pvalue < 0.05 ~ "significant (pasteurized intervention)",
+  mutate(pvalue_signif = case_when((pvalue < 0.05) & grepl("Fresh", intervention) & (effect > 0) ~ "significant pos. effect (fresh intervention)",
+                                   (pvalue < 0.05) & grepl("Fresh", intervention) & (effect < 0) ~ "significant neg. effect (fresh intervention)",
+                                   (pvalue < 0.05) & (effect > 0) ~ "significant pos. effect (pasteurized intervention)",
+                                   (pvalue < 0.05) & (effect < 0) ~ "significant neg. effect (pasteurized intervention)",
                                    TRUE          ~ "not significant"),
          effect_label  = case_when((model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 1)        ~ paste0("+", round(effect, 0), " TPM"),
                                    (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.1)      ~ paste0("+", round(effect, 1), " TPM"),
@@ -1428,17 +1440,23 @@ dat_plot_list <- lapply(as.character(unique(dat_plot$gene)), function(gen) {
                                                           TRUE ~ paste0(round(dat_gene$baseline_medianTPMAbd, 0), " TPM"))))
 })
 dat_plot <- dat_plot_list %>% dplyr::bind_rows() %>% 
-  mutate(gene         = factor(gene, levels = rev(unique(gene))),
-         intervention = gsub(intervention, pattern = "age low",  replacement = "age 21-49"),
-         intervention = gsub(intervention, pattern = "age high", replacement = "age 50-69"),
-         intervention = factor(intervention, levels = c("Baseline median TPM abd.",
-                                                        "Fresh intervention\n(age 21-49)",
-                                                        "Fresh intervention\n(age 50-69)",
-                                                        "Pasteurized intervention\n(age 21-49)",
-                                                        "Pasteurized intervention\n(age 50-69)")),
-         SCFA         = case_when(SCFA == "Acetyl-CoA" ~ "ACoA",
-                                  SCFA == "succinate"  ~ "Succ.",
-                                  TRUE                 ~ SCFA))
+  mutate(gene          = factor(gene, levels = rev(unique(gene))),
+         intervention  = gsub(intervention, pattern = "age low",  replacement = "age 21-49"),
+         intervention  = gsub(intervention, pattern = "age high", replacement = "age 50-69"),
+         intervention  = factor(intervention, levels = c("Baseline median TPM abd.",
+                                                         "Fresh intervention\n(age 21-49)",
+                                                         "Fresh intervention\n(age 50-69)",
+                                                         "Pasteurized intervention\n(age 21-49)",
+                                                         "Pasteurized intervention\n(age 50-69)")),
+         pvalue_signif = factor(pvalue_signif, levels = c("not significant",
+                                                          "significant pos. effect (fresh intervention)",
+                                                          "significant neg. effect (fresh intervention)",
+                                                          "significant pos. effect (pasteurized intervention)",
+                                                          "significant neg. effect (pasteurized intervention)",
+                                                          "")),
+         SCFA          = case_when(SCFA == "Acetyl-CoA" ~ "ACoA",
+                                   SCFA == "succinate"  ~ "Succ.",
+                                   TRUE                 ~ SCFA))
 
 # plot
 dat_plot %>% 
@@ -1446,8 +1464,10 @@ dat_plot %>%
   geom_tile(aes(fill = pvalue_signif)) +
   geom_text(aes(label = effect_label)) +
   scale_fill_manual("uncorrected p-value", values = c("not significant" = "gray95",
-                                                      "significant (fresh intervention)" = "#1F78B4",
-                                                      "significant (pasteurized intervention)" = "#FF7F00"),
+                                                      "significant pos. effect (fresh intervention)" = "#7cbde9",
+                                                      "significant neg. effect (fresh intervention)" = "#1F78B4",
+                                                      "significant pos. effect (pasteurized intervention)" = "#ffb366",
+                                                      "significant neg. effect (pasteurized intervention)" = "#FF7F00"),
                     na.value = "white") +
   facet_grid(rows = vars(SCFA), scales = "free", space = "free") +
   ggtitle("Intervention effects on SCFA genes") +
@@ -1576,8 +1596,10 @@ dat_plot <- data.frame(SCFA          = rep(dat_signif$SCFA,  times = 2),
                                          dat_signif$pastInt_sexM_pvalue,  dat_signif$pastInt_sexW_pvalue),
                        pastEffect_forSorting = rep(dat_signif$pastInt_sexM_effect, times = 4)) %>% 
   arrange(SCFA, desc(pastEffect_forSorting)) %>% 
-  mutate(pvalue_signif = case_when((pvalue < 0.05) & grepl("Fresh", intervention) ~ "significant (fresh intervention)",
-                                   pvalue < 0.05 ~ "significant (pasteurized intervention)",
+  mutate(pvalue_signif = case_when((pvalue < 0.05) & grepl("Fresh", intervention) & (effect > 0) ~ "significant pos. effect (fresh intervention)",
+                                   (pvalue < 0.05) & grepl("Fresh", intervention) & (effect < 0) ~ "significant neg. effect (fresh intervention)",
+                                   (pvalue < 0.05) & (effect > 0) ~ "significant pos. effect (pasteurized intervention)",
+                                   (pvalue < 0.05) & (effect < 0) ~ "significant neg. effect (pasteurized intervention)",
                                    TRUE          ~ "not significant"),
          effect_label  = case_when((model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 1)        ~ paste0("+", round(effect, 0), " TPM"),
                                    (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.1)      ~ paste0("+", round(effect, 1), " TPM"),
@@ -1616,13 +1638,19 @@ dat_plot_list <- lapply(as.character(unique(dat_plot$gene)), function(gen) {
                                                           TRUE ~ paste0(round(dat_gene$baseline_medianTPMAbd, 0), " TPM"))))
 })
 dat_plot <- dat_plot_list %>% dplyr::bind_rows() %>% 
-  mutate(gene         = factor(gene, levels = rev(unique(gene))),
-         intervention = gsub(intervention, pattern = "gender ", replacement = ""),
-         intervention = factor(intervention, levels = c("Baseline median TPM abd.",
-                                                        "Fresh intervention\n(male)",
-                                                        "Fresh intervention\n(female)",
-                                                        "Pasteurized intervention\n(male)",
-                                                        "Pasteurized intervention\n(female)")))
+  mutate(gene          = factor(gene, levels = rev(unique(gene))),
+         intervention  = gsub(intervention, pattern = "gender ", replacement = ""),
+         intervention  = factor(intervention, levels = c("Baseline median TPM abd.",
+                                                         "Fresh intervention\n(male)",
+                                                         "Fresh intervention\n(female)",
+                                                         "Pasteurized intervention\n(male)",
+                                                         "Pasteurized intervention\n(female)")),
+         pvalue_signif = factor(pvalue_signif, levels = c("not significant",
+                                                          "significant pos. effect (fresh intervention)",
+                                                          "significant neg. effect (fresh intervention)",
+                                                          "significant pos. effect (pasteurized intervention)",
+                                                          "significant neg. effect (pasteurized intervention)",
+                                                          "")),)
 
 # plot
 dat_plot %>% 
@@ -1630,8 +1658,10 @@ dat_plot %>%
   geom_tile(aes(fill = pvalue_signif)) +
   geom_text(aes(label = effect_label)) +
   scale_fill_manual("uncorrected p-value", values = c("not significant" = "gray95",
-                                                      "significant (fresh intervention)" = "#1F78B4",
-                                                      "significant (pasteurized intervention)" = "#FF7F00"),
+                                                      "significant pos. effect (fresh intervention)" = "#7cbde9",
+                                                      "significant neg. effect (fresh intervention)" = "#1F78B4",
+                                                      "significant pos. effect (pasteurized intervention)" = "#ffb366",
+                                                      "significant neg. effect (pasteurized intervention)" = "#FF7F00"),
                     na.value = "white") +
   facet_grid(rows = vars(SCFA), scales = "free", space = "free") +
   ggtitle("Intervention effects on SCFA genes") +
@@ -1761,8 +1791,10 @@ dat_plot <- data.frame(SCFA          = rep(dat_signif$SCFA,  times = 2),
                                          dat_signif$pastInt_bmiLow_pvalue,  dat_signif$pastInt_bmiHigh_pvalue),
                        pastEffect_forSorting = rep(dat_signif$pastInt_bmiLow_effect, times = 4)) %>% 
   arrange(SCFA, desc(pastEffect_forSorting)) %>% 
-  mutate(pvalue_signif = case_when((pvalue < 0.05) & grepl("Fresh", intervention) ~ "significant (fresh intervention)",
-                                   pvalue < 0.05 ~ "significant (pasteurized intervention)",
+  mutate(pvalue_signif = case_when((pvalue < 0.05) & grepl("Fresh", intervention) & (effect > 0) ~ "significant pos. effect (fresh intervention)",
+                                   (pvalue < 0.05) & grepl("Fresh", intervention) & (effect < 0) ~ "significant neg. effect (fresh intervention)",
+                                   (pvalue < 0.05) & (effect > 0) ~ "significant pos. effect (pasteurized intervention)",
+                                   (pvalue < 0.05) & (effect < 0) ~ "significant neg. effect (pasteurized intervention)",
                                    TRUE          ~ "not significant"),
          effect_label  = case_when((model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 1)        ~ paste0("+", round(effect, 0), " TPM"),
                                    (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.1)      ~ paste0("+", round(effect, 1), " TPM"),
@@ -1801,14 +1833,20 @@ dat_plot_list <- lapply(as.character(unique(dat_plot$gene)), function(gen) {
                                                           TRUE ~ paste0(round(dat_gene$baseline_medianTPMAbd, 0), " TPM"))))
 })
 dat_plot <- dat_plot_list %>% dplyr::bind_rows() %>% 
-  mutate(gene         = factor(gene, levels = rev(unique(gene))),
-         intervention = gsub(intervention, pattern = "low",  replacement = "[18, 25)"),
-         intervention = gsub(intervention, pattern = "high", replacement = "[25, 31]"),
-         intervention = factor(intervention, levels = c("Baseline median TPM abd.",
-                                                        "Fresh intervention\n(BMI [18, 25))",
-                                                        "Fresh intervention\n(BMI [25, 31])",
-                                                        "Pasteurized intervention\n(BMI [18, 25))",
-                                                        "Pasteurized intervention\n(BMI [25, 31])")))
+  mutate(gene          = factor(gene, levels = rev(unique(gene))),
+         intervention  = gsub(intervention, pattern = "low",  replacement = "[18, 25)"),
+         intervention  = gsub(intervention, pattern = "high", replacement = "[25, 31]"),
+         intervention  = factor(intervention, levels = c("Baseline median TPM abd.",
+                                                         "Fresh intervention\n(BMI [18, 25))",
+                                                         "Fresh intervention\n(BMI [25, 31])",
+                                                         "Pasteurized intervention\n(BMI [18, 25))",
+                                                         "Pasteurized intervention\n(BMI [25, 31])")),
+         pvalue_signif = factor(pvalue_signif, levels = c("not significant",
+                                                          "significant pos. effect (fresh intervention)",
+                                                          "significant neg. effect (fresh intervention)",
+                                                          "significant pos. effect (pasteurized intervention)",
+                                                          "significant neg. effect (pasteurized intervention)",
+                                                          "")),)
 
 # plot
 dat_plot %>% 
@@ -1816,8 +1854,10 @@ dat_plot %>%
   geom_tile(aes(fill = pvalue_signif)) +
   geom_text(aes(label = effect_label)) +
   scale_fill_manual("uncorrected p-value", values = c("not significant" = "gray95",
-                                                      "significant (fresh intervention)" = "#1F78B4",
-                                                      "significant (pasteurized intervention)" = "#FF7F00"),
+                                                      "significant pos. effect (fresh intervention)" = "#7cbde9",
+                                                      "significant neg. effect (fresh intervention)" = "#1F78B4",
+                                                      "significant pos. effect (pasteurized intervention)" = "#ffb366",
+                                                      "significant neg. effect (pasteurized intervention)" = "#FF7F00"),
                     na.value = "white") +
   facet_grid(rows = vars(SCFA), scales = "free", space = "free") +
   ggtitle("Intervention effects on SCFA genes") +
@@ -2169,7 +2209,9 @@ plot_dat_long <- data.frame(SCFA                 = rep(plot_dat_wide$SCFA, times
                                                      plot_dat_wide$n_pastSignifEffects_sexW,
                                                      plot_dat_wide$n_pastSignifEffects_bmiLow,
                                                      plot_dat_wide$n_pastSignifEffects_bmiHigh)) %>% 
-  mutate(SCFA_label   = paste0(SCFA, "\n", n_genes, " genes"),
+  mutate(SCFA         = gsub(SCFA, pattern = "succinate",  replacement = "Succinate"),
+         SCFA         = gsub(SCFA, pattern = "propionate", replacement = "Propionate"),
+         SCFA_label   = paste0(SCFA, "\n", n_genes, " genes"),
          effect_group = factor(effect_group, levels = c("overall", "ageInt", "sexInt", "bmiInt")),
          effect_type  = factor(effect_type, levels = rev(c("overall", "ageLow", "ageHigh", "sexM", "sexW", "bmiLow", "bmiHigh"))))
 
@@ -2235,7 +2277,8 @@ gg_overall <- dat_plot_overall %>%
          pvalue_signif = gsub(pvalue_signif, pattern = "pasteurized",   replacement = "past."),
          pvalue_signif = factor(pvalue_signif, levels = c("not significant", "pos. effect (fresh)",
                                                           "neg. effect (fresh)", "pos. effect (past.)",
-                                                          "neg. effect (past.)", ""))) %>% 
+                                                          "neg. effect (past.)", "")),
+         effect_label  = gsub(effect_label, pattern = "\n", replacement = " ")) %>% 
   ggplot(aes(x = intervention, y = gene)) +
   geom_tile(aes(fill = pvalue_signif)) +
   geom_text(aes(label = effect_label, size = text_size)) +
@@ -2245,9 +2288,9 @@ gg_overall <- dat_plot_overall %>%
                                           "pos. effect (past.)" = "#ffb366",
                                           "neg. effect (past.)" = "#FF7F00"),
                     na.value = "white") +
-  scale_size(range = c(3, 4), guide = "none") +
+  scale_size(range = c(3.5, 4), guide = "none") +
   labs(tag = "(A)") +
-  theme_minimal(base_size = 14) +
+  theme_minimal(base_size = 15) +
   theme(plot.title = element_text(hjust = 0.5),
         plot.tag.location = "plot",
         plot.tag          = element_text(size = 18, margin = margin(t = -30)),
@@ -2270,7 +2313,7 @@ gg_base    <- data.frame(x       = rnorm(n = 5),
                                           "pos. effect (past.)" = "#ffb366",
                                           "neg. effect (past.)" = "#FF7F00"),
                     na.value = "white") +
-  theme_minimal(base_size = 14) +
+  theme_minimal(base_size = 15) +
   theme(legend.position = "bottom")
 gg_legend  <- ggpubr::get_legend(gg_base) %>% ggpubr::as_ggplot()
 
@@ -2302,7 +2345,7 @@ gg_age <- dat_plot_ageInt %>%
                     na.value = "white") +
   guides(fill = guide_legend(nrow = 1)) +
   facet_grid(cols = vars(intervention3), scales = "free", space = "free") +
-  theme_minimal(base_size = 14) +
+  theme_minimal(base_size = 15) +
   theme(plot.title = element_text(hjust = 0.5),
         axis.title = element_blank(),
         panel.grid = element_blank(),
@@ -2337,7 +2380,7 @@ gg_sex <- dat_plot_sexInt %>%
                                           "neg. effect (past.)" = "#FF7F00"),
                     na.value = "white") +
   facet_grid(cols = vars(intervention3), scales = "free", space = "free") +
-  theme_minimal(base_size = 14) +
+  theme_minimal(base_size = 15) +
   theme(plot.title = element_text(hjust = 0.5),
         axis.title = element_blank(),
         panel.grid = element_blank(),
@@ -2373,7 +2416,7 @@ gg_bmi <- dat_plot_bmiInt %>%
   # facet_grid(rows = vars(phylum), cols = vars(intervention3), scales = "free", space = "free") +
   facet_grid(cols = vars(intervention3), scales = "free", space = "free") +
   # ggtitle("BMI-specific effects") +
-  theme_minimal(base_size = 14) +
+  theme_minimal(base_size = 15) +
   theme(plot.title = element_text(hjust = 0.5),
         axis.title = element_blank(),
         panel.grid = element_blank(),
@@ -2397,15 +2440,15 @@ gg_table <- plot_dat_longer %>%
   ggplot(aes(x = intervention, y = effect_type)) +
   geom_tile(aes(fill = fill_tiles, alpha = alpha_tiles)) +
   geom_text(aes(label = value, alpha = alpha_value)) +
-  facet_grid(effect_group ~ SCFA, scales = "free") +
+  facet_grid(effect_group ~ SCFA_label, scales = "free") +
   scale_fill_manual(values = c("no"             = "white",
                                "Pyruvate"       = col_vector[1],
                                "Acetyl-CoA"     = col_vector[2],
                                "Acetate"        = col_vector[3],
-                               "succinate"      = col_vector[4],
+                               "Succinate"      = col_vector[4],
                                "Butyryl-CoA"    = col_vector[5],
-                               "propionate"     = col_vector[6])) +
-  theme_minimal(base_size = 13) +
+                               "Propionate"     = col_vector[6])) +
+  theme_minimal(base_size = 14) +
   theme(plot.title      = element_text(hjust = 0.5),
         axis.title      = element_blank(),
         panel.grid      = element_blank(),
@@ -2421,7 +2464,7 @@ text_dat <- data.frame(x = 0.5,
 gg_header_base <- ggplot() +
   geom_hline(yintercept = 0) +
   xlim(c(0,1)) + ylim(c(0,1)) +
-  theme_minimal(base_size = 14) +
+  theme_minimal(base_size = 15) +
   theme(panel.grid        = element_blank(),
         plot.tag.location = "plot",
         plot.tag          = element_text(size = 18, margin = margin(t = -5)),
@@ -2450,7 +2493,7 @@ HJ
 (gg_overall + gg_legend + gg_headerA + gg_headerB + gg_age + ggplot() + gg_sex + gg_bmi + gg_table) +
   patchwork::plot_layout(ncol = 2, heights = c(.9,.7,.2,.1,.9,.75,.45,0), design = layout) +
   patchwork::plot_annotation(title = "Overall effects on SCFA gene abundance",
-                             theme    = theme(plot.title    = element_text(size = 16)))
+                             theme    = theme(plot.title    = element_text(size = 18)))
 # ggsave("Figure6_geneScreening.png", width = 13, height = 7.5)
 ```
 
@@ -2591,8 +2634,10 @@ dat_plot <- data.frame(pathway      = rep(dat_PWsignif$pathway, times = 2),
                        pastEffect_forSorting = rep(dat_PWsignif$pastInt_effect, times = 2)) %>% 
   dplyr::left_join(dat_PW %>% select(taxonomy_level3, taxonomy_level1) %>% distinct(taxonomy_level3, .keep_all = TRUE), by = c("pathway" = "taxonomy_level3")) %>% 
   arrange(desc(pastEffect_forSorting)) %>% 
-  mutate(pvalue_signif = case_when((pvalue < 0.05) & (intervention == "Fresh intervention") ~ "significant (fresh intervention)",
-                                   pvalue < 0.05 ~ "significant (pasteurized intervention)",
+  mutate(pvalue_signif = case_when((pvalue < 0.05) & grepl("Fresh", intervention) & (effect > 0) ~ "significant pos. effect (fresh intervention)",
+                                   (pvalue < 0.05) & grepl("Fresh", intervention) & (effect < 0) ~ "significant neg. effect (fresh intervention)",
+                                   (pvalue < 0.05) & (effect > 0) ~ "significant pos. effect (pasteurized intervention)",
+                                   (pvalue < 0.05) & (effect < 0) ~ "significant neg. effect (pasteurized intervention)",
                                    TRUE          ~ "not significant"),
          effect_label  = case_when((model == "Gaussian") & (effect >= 1)        ~ paste0("+", round(effect, 0), " TPM"),
                                    (model == "Gaussian") & (effect >= 0.1)      ~ paste0("+", round(effect, 1), " TPM"),
@@ -2631,8 +2676,14 @@ dat_plot_list <- lapply(as.character(unique(dat_plot$pathway)), function(pw) {
                                                           TRUE ~ paste0(round(dat_pw$baseline_medianTPMAbd, 0), " TPM"))))
 })
 dat_plot <- dat_plot_list %>% dplyr::bind_rows() %>% 
-  mutate(pathway      = factor(pathway, levels = rev(unique(pathway))),
-         intervention = factor(intervention, levels = c("Baseline median TPM abd.", "Fresh intervention", "Pasteurized intervention")),
+  mutate(pathway         = factor(pathway, levels = rev(unique(pathway))),
+         intervention    = factor(intervention, levels = c("Baseline median TPM abd.", "Fresh intervention", "Pasteurized intervention")),
+         pvalue_signif   = factor(pvalue_signif, levels = c("not significant",
+                                                            "significant pos. effect (fresh intervention)",
+                                                            "significant neg. effect (fresh intervention)",
+                                                            "significant pos. effect (pasteurized intervention)",
+                                                            "significant neg. effect (pasteurized intervention)",
+                                                            "")),
          taxonomy_level1 = case_when(taxonomy_level1 == "Cellular Processes"             ~ "CP",
                                      taxonomy_level1 == "Genetic Information Processing" ~ "GIP",
                                      TRUE                                                ~ taxonomy_level1),
@@ -2645,15 +2696,17 @@ dat_plot %>%
   geom_tile(aes(fill = pvalue_signif)) +
   geom_text(aes(label = effect_label)) +
   scale_fill_manual("uncorrected p-value", values = c("not significant" = "gray95",
-                                                      "significant (fresh intervention)" = "#1F78B4",
-                                                      "significant (pasteurized intervention)" = "#FF7F00"),
+                                                      "significant pos. effect (fresh intervention)" = "#7cbde9",
+                                                      "significant neg. effect (fresh intervention)" = "#1F78B4",
+                                                      "significant pos. effect (pasteurized intervention)" = "#ffb366",
+                                                      "significant neg. effect (pasteurized intervention)" = "#FF7F00"),
                     na.value = "white") +
   facet_grid(rows = vars(taxonomy_level1), scales = "free", space = "free") +
   ggtitle("Intervention effects on pathways") +
   theme(axis.title = element_blank(),
         panel.grid = element_blank(),
         strip.background = element_rect(fill = "gray97", color = "gray97"))
-# ggsave("FigureS21_pathwayScreening_pvalue.png", width = 10, height = 10)
+# ggsave("FigureS20_pathwayScreening_pvalue.png", width = 10, height = 10)
 ```
 
 
@@ -2752,8 +2805,10 @@ dat_plot <- data.frame(pathway       = rep(dat_signif$pathway,  times = 4),
                        pastEffect_forSorting = rep(dat_signif$pastInt_ageLow_effect, times = 4)) %>% 
   dplyr::left_join(dat_PW %>% select(taxonomy_level3, taxonomy_level1) %>% distinct(taxonomy_level3, .keep_all = TRUE), by = c("pathway" = "taxonomy_level3")) %>% 
   arrange(desc(pastEffect_forSorting)) %>% 
-  mutate(pvalue_signif = case_when((pvalue < 0.05) & grepl("Fresh", intervention) ~ "significant (fresh intervention)",
-                                   pvalue < 0.05 ~ "significant (pasteurized intervention)",
+  mutate(pvalue_signif = case_when((pvalue < 0.05) & grepl("Fresh", intervention) & (effect > 0) ~ "significant pos. effect (fresh intervention)",
+                                   (pvalue < 0.05) & grepl("Fresh", intervention) & (effect < 0) ~ "significant neg. effect (fresh intervention)",
+                                   (pvalue < 0.05) & (effect > 0) ~ "significant pos. effect (pasteurized intervention)",
+                                   (pvalue < 0.05) & (effect < 0) ~ "significant neg. effect (pasteurized intervention)",
                                    TRUE          ~ "not significant"),
          effect_label  = case_when((model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 1)        ~ paste0("+", round(effect, 0), " TPM"),
                                    (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.1)      ~ paste0("+", round(effect, 1), " TPM"),
@@ -2792,14 +2847,20 @@ dat_plot_list <- lapply(as.character(unique(dat_plot$pathway)), function(pw) {
                                                             TRUE ~ paste0(round(dat_pw$baseline_medianTPMAbd, 0), " TPM"))))
 })
 dat_plot <- dat_plot_list %>% dplyr::bind_rows() %>% 
-  mutate(pathway      = factor(pathway, levels = rev(unique(pathway))),
-         intervention = gsub(intervention, pattern = "age low",  replacement = "age 21-49"),
-         intervention = gsub(intervention, pattern = "age high", replacement = "age 50-69"),
-         intervention = factor(intervention, levels = c("Baseline median TPM abd.",
-                                                        "Fresh intervention\n(age 21-49)",
-                                                        "Fresh intervention\n(age 50-69)",
-                                                        "Pasteurized intervention\n(age 21-49)",
-                                                        "Pasteurized intervention\n(age 50-69)")),
+  mutate(pathway         = factor(pathway, levels = rev(unique(pathway))),
+         intervention    = gsub(intervention, pattern = "age low",  replacement = "age 21-49"),
+         intervention    = gsub(intervention, pattern = "age high", replacement = "age 50-69"),
+         intervention    = factor(intervention, levels = c("Baseline median TPM abd.",
+                                                           "Fresh intervention\n(age 21-49)",
+                                                           "Fresh intervention\n(age 50-69)",
+                                                           "Pasteurized intervention\n(age 21-49)",
+                                                           "Pasteurized intervention\n(age 50-69)")),
+         pvalue_signif   = factor(pvalue_signif, levels = c("not significant",
+                                                            "significant pos. effect (fresh intervention)",
+                                                            "significant neg. effect (fresh intervention)",
+                                                            "significant pos. effect (pasteurized intervention)",
+                                                            "significant neg. effect (pasteurized intervention)",
+                                                            "")),
          taxonomy_level1 = case_when(taxonomy_level1 == "Cellular Processes"             ~ "CP",
                                      taxonomy_level1 == "Genetic Information Processing" ~ "GIP",
                                      TRUE                                                ~ taxonomy_level1),
@@ -2811,8 +2872,10 @@ dat_plot %>%
   geom_tile(aes(fill = pvalue_signif)) +
   geom_text(aes(label = effect_label)) +
   scale_fill_manual("uncorrected p-value", values = c("not significant" = "gray95",
-                                                      "significant (fresh intervention)" = "#1F78B4",
-                                                      "significant (pasteurized intervention)" = "#FF7F00"),
+                                                      "significant pos. effect (fresh intervention)" = "#7cbde9",
+                                                      "significant neg. effect (fresh intervention)" = "#1F78B4",
+                                                      "significant pos. effect (pasteurized intervention)" = "#ffb366",
+                                                      "significant neg. effect (pasteurized intervention)" = "#FF7F00"),
                     na.value = "white") +
   facet_grid(rows = vars(taxonomy_level1), scales = "free", space = "free") +
   ggtitle("Intervention effects on pathways") +
@@ -2848,8 +2911,10 @@ dat_plot <- data.frame(pathway       = rep(dat_signif$pathway,  times = 4),
                        pastEffect_forSorting = rep(dat_signif$pastInt_sexM_effect, times = 4)) %>% 
   dplyr::left_join(dat_PW %>% select(taxonomy_level3, taxonomy_level1) %>% distinct(taxonomy_level3, .keep_all = TRUE), by = c("pathway" = "taxonomy_level3")) %>% 
   arrange(desc(pastEffect_forSorting)) %>% 
-  mutate(pvalue_signif = case_when((pvalue < 0.05) & grepl("Fresh", intervention) ~ "significant (fresh intervention)",
-                                   pvalue < 0.05 ~ "significant (pasteurized intervention)",
+  mutate(pvalue_signif = case_when((pvalue < 0.05) & grepl("Fresh", intervention) & (effect > 0) ~ "significant pos. effect (fresh intervention)",
+                                   (pvalue < 0.05) & grepl("Fresh", intervention) & (effect < 0) ~ "significant neg. effect (fresh intervention)",
+                                   (pvalue < 0.05) & (effect > 0) ~ "significant pos. effect (pasteurized intervention)",
+                                   (pvalue < 0.05) & (effect < 0) ~ "significant neg. effect (pasteurized intervention)",
                                    TRUE          ~ "not significant"),
          effect_label  = case_when((model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 1)        ~ paste0("+", round(effect, 0), " TPM"),
                                    (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.1)      ~ paste0("+", round(effect, 1), " TPM"),
@@ -2888,13 +2953,19 @@ dat_plot_list <- lapply(as.character(unique(dat_plot$pathway)), function(pw) {
                                                             TRUE ~ paste0(round(dat_pw$baseline_medianTPMAbd, 0), " TPM"))))
 })
 dat_plot <- dat_plot_list %>% dplyr::bind_rows() %>% 
-  mutate(pathway      = factor(pathway, levels = rev(unique(pathway))),
-         intervention = gsub(intervention, pattern = "gender ", replacement = ""),
-         intervention = factor(intervention, levels = c("Baseline median TPM abd.",
-                                                        "Fresh intervention\n(male)",
-                                                        "Fresh intervention\n(female)",
-                                                        "Pasteurized intervention\n(male)",
-                                                        "Pasteurized intervention\n(female)")),
+  mutate(pathway         = factor(pathway, levels = rev(unique(pathway))),
+         intervention    = gsub(intervention, pattern = "gender ", replacement = ""),
+         intervention    = factor(intervention, levels = c("Baseline median TPM abd.",
+                                                           "Fresh intervention\n(male)",
+                                                           "Fresh intervention\n(female)",
+                                                           "Pasteurized intervention\n(male)",
+                                                           "Pasteurized intervention\n(female)")),
+         pvalue_signif   = factor(pvalue_signif, levels = c("not significant",
+                                                            "significant pos. effect (fresh intervention)",
+                                                            "significant neg. effect (fresh intervention)",
+                                                            "significant pos. effect (pasteurized intervention)",
+                                                            "significant neg. effect (pasteurized intervention)",
+                                                            "")),
          taxonomy_level1 = case_when(taxonomy_level1 == "Cellular Processes" ~ "CP",
                                      TRUE                                    ~ taxonomy_level1),
          taxonomy_level1 = factor(taxonomy_level1, levels = c("CP", "Genetic Information Processing", "Metabolism")))
@@ -2905,8 +2976,10 @@ dat_plot %>%
   geom_tile(aes(fill = pvalue_signif)) +
   geom_text(aes(label = effect_label)) +
   scale_fill_manual("uncorrected p-value", values = c("not significant" = "gray95",
-                                                      "significant (fresh intervention)" = "#1F78B4",
-                                                      "significant (pasteurized intervention)" = "#FF7F00"),
+                                                      "significant pos. effect (fresh intervention)" = "#7cbde9",
+                                                      "significant neg. effect (fresh intervention)" = "#1F78B4",
+                                                      "significant pos. effect (pasteurized intervention)" = "#ffb366",
+                                                      "significant neg. effect (pasteurized intervention)" = "#FF7F00"),
                     na.value = "white") +
   facet_grid(rows = vars(taxonomy_level1), scales = "free", space = "free") +
   ggtitle("Intervention effects on pathways") +
@@ -2943,8 +3016,10 @@ dat_plot <- data.frame(pathway       = rep(dat_signif$pathway,  times = 4),
                        pastEffect_forSorting = rep(dat_signif$pastInt_bmiLow_effect, times = 4)) %>% 
   dplyr::left_join(dat_PW %>% select(taxonomy_level3, taxonomy_level1) %>% distinct(taxonomy_level3, .keep_all = TRUE), by = c("pathway" = "taxonomy_level3")) %>% 
   arrange(desc(pastEffect_forSorting)) %>% 
-  mutate(pvalue_signif = case_when((pvalue < 0.05) & grepl("Fresh", intervention) ~ "significant (fresh intervention)",
-                                   pvalue < 0.05 ~ "significant (pasteurized intervention)",
+  mutate(pvalue_signif = case_when((pvalue < 0.05) & grepl("Fresh", intervention) & (effect > 0) ~ "significant pos. effect (fresh intervention)",
+                                   (pvalue < 0.05) & grepl("Fresh", intervention) & (effect < 0) ~ "significant neg. effect (fresh intervention)",
+                                   (pvalue < 0.05) & (effect > 0) ~ "significant pos. effect (pasteurized intervention)",
+                                   (pvalue < 0.05) & (effect < 0) ~ "significant neg. effect (pasteurized intervention)",
                                    TRUE          ~ "not significant"),
          effect_label  = case_when((model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 1)        ~ paste0("+", round(effect, 0), " TPM"),
                                    (model %in% c("Gaussian", "ZI Gaussian")) & (effect >= 0.1)      ~ paste0("+", round(effect, 1), " TPM"),
@@ -2983,14 +3058,20 @@ dat_plot_list <- lapply(as.character(unique(dat_plot$pathway)), function(pw) {
                                                             TRUE ~ paste0(round(dat_pw$baseline_medianTPMAbd, 0), " TPM"))))
 })
 dat_plot <- dat_plot_list %>% dplyr::bind_rows() %>% 
-  mutate(pathway      = factor(pathway, levels = rev(unique(pathway))),
-         intervention = gsub(intervention, pattern = "low",  replacement = "[18, 25)"),
-         intervention = gsub(intervention, pattern = "high", replacement = "[25, 31]"),
-         intervention = factor(intervention, levels = c("Baseline median TPM abd.",
-                                                        "Fresh intervention\n(BMI [18, 25))",
-                                                        "Fresh intervention\n(BMI [25, 31])",
-                                                        "Pasteurized intervention\n(BMI [18, 25))",
-                                                        "Pasteurized intervention\n(BMI [25, 31])")),
+  mutate(pathway         = factor(pathway, levels = rev(unique(pathway))),
+         intervention    = gsub(intervention, pattern = "low",  replacement = "[18, 25)"),
+         intervention    = gsub(intervention, pattern = "high", replacement = "[25, 31]"),
+         intervention    = factor(intervention, levels = c("Baseline median TPM abd.",
+                                                           "Fresh intervention\n(BMI [18, 25))",
+                                                           "Fresh intervention\n(BMI [25, 31])",
+                                                           "Pasteurized intervention\n(BMI [18, 25))",
+                                                           "Pasteurized intervention\n(BMI [25, 31])")),
+         pvalue_signif   = factor(pvalue_signif, levels = c("not significant",
+                                                            "significant pos. effect (fresh intervention)",
+                                                            "significant neg. effect (fresh intervention)",
+                                                            "significant pos. effect (pasteurized intervention)",
+                                                            "significant neg. effect (pasteurized intervention)",
+                                                            "")),
          taxonomy_level1 = case_when(taxonomy_level1 == "Cellular Processes"             ~ "CP",
                                      taxonomy_level1 == "Genetic Information Processing" ~ "GIP",
                                      TRUE                                                ~ taxonomy_level1),
@@ -3002,8 +3083,10 @@ dat_plot %>%
   geom_tile(aes(fill = pvalue_signif)) +
   geom_text(aes(label = effect_label)) +
   scale_fill_manual("uncorrected p-value", values = c("not significant" = "gray95",
-                                                      "significant (fresh intervention)" = "#1F78B4",
-                                                      "significant (pasteurized intervention)" = "#FF7F00"),
+                                                      "significant pos. effect (fresh intervention)" = "#7cbde9",
+                                                      "significant neg. effect (fresh intervention)" = "#1F78B4",
+                                                      "significant pos. effect (pasteurized intervention)" = "#ffb366",
+                                                      "significant neg. effect (pasteurized intervention)" = "#FF7F00"),
                     na.value = "white") +
   facet_grid(rows = vars(taxonomy_level1), scales = "free", space = "free") +
   ggtitle("Intervention effects on pathways") +
@@ -3120,5 +3203,5 @@ ggplot(plot_dat_longer, aes(x = intervention, y = effect_type)) +
         legend.position = "none",
         strip.background.x = element_rect(fill = "gray97", color = "gray97"),
         strip.text.y    = element_blank())
-# ggsave("FigureS20_pathwayScreening_stratificationTable.png", width = 7, height = 4)
+# ggsave("FigureS21_pathwayScreening_stratificationTable.png", width = 7, height = 4)
 ```

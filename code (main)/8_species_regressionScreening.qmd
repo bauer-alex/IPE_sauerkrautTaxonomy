@@ -787,8 +787,8 @@ dat_plot_list <- lapply(as.character(unique(dat_plot$species)), function(spec) {
                                                           TRUE ~ paste0(round(dat_spec$baseline_medianRelAbd, 0), "%"))))
 })
 dat_plot <- dat_plot_list %>% dplyr::bind_rows() %>% 
-  mutate(species      = factor(species, levels = rev(unique(species))),
-         intervention = factor(intervention, levels = c("Baseline median rel. abd.", "Fresh intervention", "Pasteurized intervention")),
+  mutate(species        = factor(species, levels = rev(unique(species))),
+         intervention   = factor(intervention, levels = c("Baseline median rel. abd.", "Fresh intervention", "Pasteurized intervention")),
          pvalue_signif  = factor(pvalue_signif, levels = c("not significant",
                                                            "significant pos. effect (fresh intervention)",
                                                            "significant neg. effect (fresh intervention)",
@@ -1999,7 +1999,8 @@ gg_overall <- dat_plot_overall %>%
          pvalue_signif = gsub(pvalue_signif, pattern = "pasteurized",   replacement = "past."),
          pvalue_signif = factor(pvalue_signif, levels = c("not significant", "pos. effect (fresh)",
                                                           "neg. effect (fresh)", "pos. effect (past.)",
-                                                          "neg. effect (past.)", ""))) %>% 
+                                                          "neg. effect (past.)", "")),
+         effect_label  = gsub(effect_label, pattern = "\n", replacement = " ")) %>% 
   ggplot(aes(x = intervention, y = species)) +
   geom_tile(aes(fill = pvalue_signif)) +
   geom_text(aes(label = effect_label, size = text_size)) +
@@ -2009,9 +2010,9 @@ gg_overall <- dat_plot_overall %>%
                                           "pos. effect (past.)" = "#ffb366",
                                           "neg. effect (past.)" = "#FF7F00"),
                     na.value = "white") +
-  scale_size(range = c(3, 4), guide = "none") +
+  scale_size(range = c(3.5, 4), guide = "none") +
   labs(tag = "(A)") +
-  theme_minimal(base_size = 14) +
+  theme_minimal(base_size = 14.5) +
   theme(plot.title        = element_text(hjust = 0.5),
         plot.tag.location = "plot",
         plot.tag          = element_text(size = 18, margin = margin(t = -30)),
@@ -2034,7 +2035,7 @@ gg_base    <- data.frame(x       = rnorm(n = 5),
                                           "pos. effect (past.)" = "#ffb366",
                                           "neg. effect (past.)" = "#FF7F00"),
                     na.value = "white") +
-  theme_minimal(base_size = 14) +
+  theme_minimal(base_size = 15) +
   theme(legend.position = "bottom")
 gg_legend  <- ggpubr::get_legend(gg_base) %>% ggpubr::as_ggplot()
 
@@ -2068,7 +2069,7 @@ gg_age <- dat_plot_ageInt %>%
   # facet_grid(rows = vars(phylum), cols = vars(intervention3), scales = "free", space = "free") +
   facet_grid(cols = vars(intervention3), scales = "free", space = "free") +
   # ggtitle("age-stratified effects") +
-  theme_minimal(base_size = 14) +
+  theme_minimal(base_size = 15) +
   theme(plot.title = element_text(hjust = 0.5),
         axis.title = element_blank(),
         panel.grid = element_blank(),
@@ -2104,7 +2105,7 @@ gg_sex <- dat_plot_sexInt %>%
   # facet_grid(rows = vars(phylum), cols = vars(intervention3), scales = "free", space = "free") +
   facet_grid(cols = vars(intervention3), scales = "free", space = "free") +
   # ggtitle("Gender-specific effects") +
-  theme_minimal(base_size = 14) +
+  theme_minimal(base_size = 15) +
   theme(plot.title = element_text(hjust = 0.5),
         axis.title = element_blank(),
         panel.grid = element_blank(),
@@ -2140,7 +2141,7 @@ gg_bmi <- dat_plot_bmiInt %>%
   # facet_grid(rows = vars(phylum), cols = vars(intervention3), scales = "free", space = "free") +
   facet_grid(cols = vars(intervention3), scales = "free", space = "free") +
   # ggtitle("BMI-specific effects") +
-  theme_minimal(base_size = 14) +
+  theme_minimal(base_size = 15) +
   theme(plot.title = element_text(hjust = 0.5),
         axis.title = element_blank(),
         panel.grid = element_blank(),
@@ -2170,7 +2171,7 @@ gg_table <- plot_dat_longer %>%
                                "Bacteroidetes"  = col_vector[2],
                                "Actinobacteria" = col_vector[3],
                                "Proteobacteria" = col_vector[4])) +
-  theme_minimal(base_size = 14) +
+  theme_minimal(base_size = 15) +
   theme(plot.title      = element_text(hjust = 0.5),
         axis.title      = element_blank(),
         panel.grid      = element_blank(),
@@ -2186,7 +2187,7 @@ text_dat <- data.frame(x = 0.5,
 gg_header_base <- ggplot() +
   geom_hline(yintercept = 0) +
   xlim(c(0,1)) + ylim(c(0,1)) +
-  theme_minimal(base_size = 14) +
+  theme_minimal(base_size = 15) +
   theme(panel.grid        = element_blank(),
         plot.tag.location = "plot",
         plot.tag          = element_text(size = 18, margin = margin(t = -5)),
@@ -2215,8 +2216,8 @@ HJ
 (gg_overall + gg_legend + gg_headerA + gg_headerB + gg_age + ggplot() + gg_sex + gg_bmi + gg_table) +
   patchwork::plot_layout(ncol = 2, heights = c(.9,.7,.15,.1,1,.3,.6,.1), design = layout) +
   patchwork::plot_annotation(title = "Overall effects on species' abundance",
-                             theme    = theme(plot.title    = element_text(size = 16)))
-# ggsave("Figure5_speciesScreening.png", width = 13, height = 8)
+                             theme    = theme(plot.title    = element_text(size = 18)))
+# ggsave("Figure4_speciesScreening.png", width = 13, height = 8)
 ```
 
 

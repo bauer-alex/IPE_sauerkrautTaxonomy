@@ -2186,7 +2186,7 @@ GG
 (gg_titleGaussian + gg_titleExp + gg_bloodGaussian + gg_bloodExp + gg_stoolGaussian + gg_stoolExp + guide_area()) +
   patchwork::plot_layout(nrow = 3, ncol = 2, widths = c(.35,.65), heights = c(.01, 1, 1),
                          axis_titles = "collect", guides = "collect", design = layout)
-ggsave("Figure4_bloodAndStoolSCFAmodels.png", width = 12, height = 6)
+# ggsave("Figure5_bloodAndStoolSCFAmodels.png", width = 12, height = 6)
 ```
 
 ```{r}
