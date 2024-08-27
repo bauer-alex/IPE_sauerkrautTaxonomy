@@ -82,11 +82,34 @@ dat <- dat %>%
          bmi_cat = factor(bmi_cat))
 ```
 
-Limit data to baseline measurements
+Limit data to baseline measurements (T1 and T3) and average over these baseline timepoints per person
 
 ```{r}
 dat <- dat %>% 
-  filter(timepoint == "T1")
+  filter(timepoint %in% c("T1","T3")) %>% 
+  group_by(participant_id) %>% 
+  summarize(age                      = first(age),
+            gender                   = first(gender),
+            bmi_t0                   = first(bmi_t0),
+            hipWaistRatio_t0         = first(hipWaistRatio_t0),
+            blood_aceticAcid         = mean(blood_aceticAcid, na.rm = TRUE),
+            blood_propionicAcid      = mean(blood_propionicAcid, na.rm = TRUE),
+            blood_butyricAcid        = mean(blood_butyricAcid, na.rm = TRUE),
+            blood_valericAcid        = mean(blood_valericAcid, na.rm = TRUE),
+            blood_hexanoicAcid       = mean(blood_hexanoicAcid, na.rm = TRUE),
+            blood_isobutyricAcid     = mean(blood_isobutyricAcid, na.rm = TRUE),
+            blood_isovalericAcid     = mean(blood_isovalericAcid, na.rm = TRUE),
+            blood_methylbutyricAcid  = mean(blood_methylbutyricAcid, na.rm = TRUE),
+            richness_hill            = mean(richness_hill, na.rm = TRUE),
+            richness_observed        = mean(richness_observed, na.rm = TRUE),
+            evenness_pielou          = mean(evenness_pielou, na.rm = TRUE),
+            evenness_simpson         = mean(evenness_simpson, na.rm = TRUE),
+            diversity_shannon        = mean(diversity_shannon, na.rm = TRUE),
+            diversity_invSimpson     = mean(diversity_invSimpson, na.rm = TRUE),
+            dominance_dbp            = mean(dominance_dbp, na.rm = TRUE),
+            dominance_coreAbundance  = mean(dominance_coreAbundance, na.rm = TRUE),
+            rarity_logModuloSkewness = mean(rarity_logModuloSkewness, na.rm = TRUE),
+            divergence_toMedian      = mean(divergence_toMedian, na.rm = TRUE))
 ```
 
 
@@ -147,5 +170,5 @@ dat_results %>%
   kable() %>% 
   kable_styling()
 
-# write.csv(dat_results, file = "11_strata_baselineDescriptionTable.csv", row.names = TRUE)
+# write.csv(dat_results, file = "1c_strata_baselineDescriptionTable.csv", row.names = TRUE)
 ```
