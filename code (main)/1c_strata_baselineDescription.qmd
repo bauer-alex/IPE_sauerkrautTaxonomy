@@ -93,13 +93,21 @@ dat <- dat %>%
             bmi_t0                   = first(bmi_t0),
             hipWaistRatio_t0         = first(hipWaistRatio_t0),
             blood_aceticAcid         = mean(blood_aceticAcid, na.rm = TRUE),
+            stool_aceticAcid         = mean(stool_aceticAcid, na.rm = TRUE),
             blood_propionicAcid      = mean(blood_propionicAcid, na.rm = TRUE),
+            stool_propionicAcid      = mean(stool_propionicAcid, na.rm = TRUE),
             blood_butyricAcid        = mean(blood_butyricAcid, na.rm = TRUE),
+            stool_butyricAcid        = mean(stool_butyricAcid, na.rm = TRUE),
             blood_valericAcid        = mean(blood_valericAcid, na.rm = TRUE),
+            stool_valericAcid        = mean(stool_valericAcid, na.rm = TRUE),
             blood_hexanoicAcid       = mean(blood_hexanoicAcid, na.rm = TRUE),
+            stool_hexanoicAcid       = mean(stool_hexanoicAcid, na.rm = TRUE),
             blood_isobutyricAcid     = mean(blood_isobutyricAcid, na.rm = TRUE),
+            stool_isobutyricAcid     = mean(stool_isobutyricAcid, na.rm = TRUE),
             blood_isovalericAcid     = mean(blood_isovalericAcid, na.rm = TRUE),
+            stool_isovalericAcid     = mean(stool_isovalericAcid, na.rm = TRUE),
             blood_methylbutyricAcid  = mean(blood_methylbutyricAcid, na.rm = TRUE),
+            stool_methylbutyricAcid  = mean(stool_methylbutyricAcid, na.rm = TRUE),
             richness_hill            = mean(richness_hill, na.rm = TRUE),
             richness_observed        = mean(richness_observed, na.rm = TRUE),
             evenness_pielou          = mean(evenness_pielou, na.rm = TRUE),
@@ -116,35 +124,43 @@ dat <- dat %>%
 
 # Description
 
-##### Table showing median values for metric variables
+##### Table showing mean values for metric variables
 
 ```{r}
 # helper function to describe a subgroup
 create_subgroupDescription <- function(dat_subgroup) {
   
   data.frame(n                        = nrow(dat_subgroup),
-             age                      = median(dat_subgroup$age) %>% round(),
+             age                      = mean(dat_subgroup$age) %>% round(),
              gender_male              = paste0(round(100 * prop.table(table(dat_subgroup$gender))["M"]), "%"),
-             BMI                      = median(dat_subgroup$bmi_t0)                   %>% round(1),
-             hipWaistRatio            = median(dat_subgroup$hipWaistRatio_t0, na.rm = TRUE) %>% round(2),
-             blood_aceticAcid         = median(dat_subgroup$blood_aceticAcid)               %>% round(1),
-             blood_propionicAcid      = median(dat_subgroup$blood_propionicAcid)            %>% round(1),
-             blood_butyricAcid        = median(dat_subgroup$blood_butyricAcid)              %>% round(1),
-             blood_valericAcid        = median(dat_subgroup$blood_valericAcid)              %>% round(1),
-             blood_hexanoicAcid       = median(dat_subgroup$blood_hexanoicAcid)             %>% round(1),
-             blood_isobutyricAcid     = median(dat_subgroup$blood_isobutyricAcid)           %>% round(1),
-             blood_isovalericAcid     = median(dat_subgroup$blood_isovalericAcid)           %>% round(1),
-             blood_methylbutyricAcid  = median(dat_subgroup$blood_methylbutyricAcid)        %>% round(1),
-             richness_hill            = median(dat_subgroup$richness_hill)            %>% round(1),
-             richness_observed        = median(dat_subgroup$richness_observed)        %>% round(),
-             evenness_pielou          = median(dat_subgroup$evenness_pielou)          %>% round(2),
-             evenness_simpson         = median(dat_subgroup$evenness_simpson)         %>% round(2),
-             diversity_shannon        = median(dat_subgroup$diversity_shannon)        %>% round(2),
-             diversity_invSimpson     = median(dat_subgroup$diversity_invSimpson)     %>% round(1),
-             dominance_dbp            = median(dat_subgroup$dominance_dbp)            %>% round(2),
-             dominance_coreAbundance  = median(dat_subgroup$dominance_coreAbundance)  %>% round(2),
-             rarity_logModuloSkewness = median(dat_subgroup$rarity_logModuloSkewness) %>% round(2),
-             divergence_toMedian      = median(dat_subgroup$divergence_toMedian)      %>% round(2))
+             BMI                      = mean(dat_subgroup$bmi_t0)                   %>% round(1),
+             hipWaistRatio            = mean(dat_subgroup$hipWaistRatio_t0, na.rm = TRUE) %>% round(2),
+             blood_aceticAcid         = mean(dat_subgroup$blood_aceticAcid)               %>% round(1),
+             stool_aceticAcid         = mean(dat_subgroup$stool_aceticAcid)               %>% round(1),
+             blood_propionicAcid      = mean(dat_subgroup$blood_propionicAcid)            %>% round(1),
+             stool_propionicAcid      = mean(dat_subgroup$stool_propionicAcid)            %>% round(1),
+             blood_butyricAcid        = mean(dat_subgroup$blood_butyricAcid)              %>% round(1),
+             stool_butyricAcid        = mean(dat_subgroup$stool_butyricAcid)              %>% round(1),
+             blood_valericAcid        = mean(dat_subgroup$blood_valericAcid)              %>% round(1),
+             stool_valericAcid        = mean(dat_subgroup$stool_valericAcid)              %>% round(1),
+             blood_hexanoicAcid       = mean(dat_subgroup$blood_hexanoicAcid)             %>% round(1),
+             stool_hexanoicAcid       = mean(dat_subgroup$stool_hexanoicAcid)             %>% round(1),
+             blood_isobutyricAcid     = mean(dat_subgroup$blood_isobutyricAcid)           %>% round(1),
+             stool_isobutyricAcid     = mean(dat_subgroup$stool_isobutyricAcid)           %>% round(1),
+             blood_isovalericAcid     = mean(dat_subgroup$blood_isovalericAcid)           %>% round(1),
+             stool_isovalericAcid     = mean(dat_subgroup$stool_isovalericAcid)           %>% round(1),
+             blood_methylbutyricAcid  = mean(dat_subgroup$blood_methylbutyricAcid)        %>% round(1),
+             stool_methylbutyricAcid  = mean(dat_subgroup$stool_methylbutyricAcid)        %>% round(1),
+             richness_hill            = mean(dat_subgroup$richness_hill)            %>% round(1),
+             richness_observed        = mean(dat_subgroup$richness_observed)        %>% round(),
+             evenness_pielou          = mean(dat_subgroup$evenness_pielou)          %>% round(2),
+             evenness_simpson         = mean(dat_subgroup$evenness_simpson)         %>% round(2),
+             diversity_shannon        = mean(dat_subgroup$diversity_shannon)        %>% round(2),
+             diversity_invSimpson     = mean(dat_subgroup$diversity_invSimpson)     %>% round(1),
+             dominance_dbp            = mean(dat_subgroup$dominance_dbp)            %>% round(2),
+             dominance_coreAbundance  = mean(dat_subgroup$dominance_coreAbundance)  %>% round(2),
+             rarity_logModuloSkewness = mean(dat_subgroup$rarity_logModuloSkewness) %>% round(2),
+             divergence_toMedian      = mean(dat_subgroup$divergence_toMedian)      %>% round(2))
 }
 ```
 
@@ -170,5 +186,5 @@ dat_results %>%
   kable() %>% 
   kable_styling()
 
-# write.csv(dat_results, file = "1c_strata_baselineDescriptionTable.csv", row.names = TRUE)
+write.csv(dat_results, file = "1c_strata_baselineDescriptionTable.csv", row.names = TRUE)
 ```

@@ -3362,30 +3362,38 @@ border: 0;
 <span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a>            <span class="at">bmi_t0                   =</span> <span class="fu">first</span>(bmi_t0),</span>
 <span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a>            <span class="at">hipWaistRatio_t0         =</span> <span class="fu">first</span>(hipWaistRatio_t0),</span>
 <span id="cb5-8"><a href="#cb5-8" aria-hidden="true" tabindex="-1"></a>            <span class="at">blood_aceticAcid         =</span> <span class="fu">mean</span>(blood_aceticAcid, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
-<span id="cb5-9"><a href="#cb5-9" aria-hidden="true" tabindex="-1"></a>            <span class="at">blood_propionicAcid      =</span> <span class="fu">mean</span>(blood_propionicAcid, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
-<span id="cb5-10"><a href="#cb5-10" aria-hidden="true" tabindex="-1"></a>            <span class="at">blood_butyricAcid        =</span> <span class="fu">mean</span>(blood_butyricAcid, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
-<span id="cb5-11"><a href="#cb5-11" aria-hidden="true" tabindex="-1"></a>            <span class="at">blood_valericAcid        =</span> <span class="fu">mean</span>(blood_valericAcid, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
-<span id="cb5-12"><a href="#cb5-12" aria-hidden="true" tabindex="-1"></a>            <span class="at">blood_hexanoicAcid       =</span> <span class="fu">mean</span>(blood_hexanoicAcid, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
-<span id="cb5-13"><a href="#cb5-13" aria-hidden="true" tabindex="-1"></a>            <span class="at">blood_isobutyricAcid     =</span> <span class="fu">mean</span>(blood_isobutyricAcid, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
-<span id="cb5-14"><a href="#cb5-14" aria-hidden="true" tabindex="-1"></a>            <span class="at">blood_isovalericAcid     =</span> <span class="fu">mean</span>(blood_isovalericAcid, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
-<span id="cb5-15"><a href="#cb5-15" aria-hidden="true" tabindex="-1"></a>            <span class="at">blood_methylbutyricAcid  =</span> <span class="fu">mean</span>(blood_methylbutyricAcid, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
-<span id="cb5-16"><a href="#cb5-16" aria-hidden="true" tabindex="-1"></a>            <span class="at">richness_hill            =</span> <span class="fu">mean</span>(richness_hill, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
-<span id="cb5-17"><a href="#cb5-17" aria-hidden="true" tabindex="-1"></a>            <span class="at">richness_observed        =</span> <span class="fu">mean</span>(richness_observed, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
-<span id="cb5-18"><a href="#cb5-18" aria-hidden="true" tabindex="-1"></a>            <span class="at">evenness_pielou          =</span> <span class="fu">mean</span>(evenness_pielou, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
-<span id="cb5-19"><a href="#cb5-19" aria-hidden="true" tabindex="-1"></a>            <span class="at">evenness_simpson         =</span> <span class="fu">mean</span>(evenness_simpson, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
-<span id="cb5-20"><a href="#cb5-20" aria-hidden="true" tabindex="-1"></a>            <span class="at">diversity_shannon        =</span> <span class="fu">mean</span>(diversity_shannon, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
-<span id="cb5-21"><a href="#cb5-21" aria-hidden="true" tabindex="-1"></a>            <span class="at">diversity_invSimpson     =</span> <span class="fu">mean</span>(diversity_invSimpson, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
-<span id="cb5-22"><a href="#cb5-22" aria-hidden="true" tabindex="-1"></a>            <span class="at">dominance_dbp            =</span> <span class="fu">mean</span>(dominance_dbp, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
-<span id="cb5-23"><a href="#cb5-23" aria-hidden="true" tabindex="-1"></a>            <span class="at">dominance_coreAbundance  =</span> <span class="fu">mean</span>(dominance_coreAbundance, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
-<span id="cb5-24"><a href="#cb5-24" aria-hidden="true" tabindex="-1"></a>            <span class="at">rarity_logModuloSkewness =</span> <span class="fu">mean</span>(rarity_logModuloSkewness, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
-<span id="cb5-25"><a href="#cb5-25" aria-hidden="true" tabindex="-1"></a>            <span class="at">divergence_toMedian      =</span> <span class="fu">mean</span>(divergence_toMedian, <span class="at">na.rm =</span> <span class="cn">TRUE</span>))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<span id="cb5-9"><a href="#cb5-9" aria-hidden="true" tabindex="-1"></a>            <span class="at">stool_aceticAcid         =</span> <span class="fu">mean</span>(stool_aceticAcid, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
+<span id="cb5-10"><a href="#cb5-10" aria-hidden="true" tabindex="-1"></a>            <span class="at">blood_propionicAcid      =</span> <span class="fu">mean</span>(blood_propionicAcid, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
+<span id="cb5-11"><a href="#cb5-11" aria-hidden="true" tabindex="-1"></a>            <span class="at">stool_propionicAcid      =</span> <span class="fu">mean</span>(stool_propionicAcid, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
+<span id="cb5-12"><a href="#cb5-12" aria-hidden="true" tabindex="-1"></a>            <span class="at">blood_butyricAcid        =</span> <span class="fu">mean</span>(blood_butyricAcid, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
+<span id="cb5-13"><a href="#cb5-13" aria-hidden="true" tabindex="-1"></a>            <span class="at">stool_butyricAcid        =</span> <span class="fu">mean</span>(stool_butyricAcid, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
+<span id="cb5-14"><a href="#cb5-14" aria-hidden="true" tabindex="-1"></a>            <span class="at">blood_valericAcid        =</span> <span class="fu">mean</span>(blood_valericAcid, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
+<span id="cb5-15"><a href="#cb5-15" aria-hidden="true" tabindex="-1"></a>            <span class="at">stool_valericAcid        =</span> <span class="fu">mean</span>(stool_valericAcid, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
+<span id="cb5-16"><a href="#cb5-16" aria-hidden="true" tabindex="-1"></a>            <span class="at">blood_hexanoicAcid       =</span> <span class="fu">mean</span>(blood_hexanoicAcid, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
+<span id="cb5-17"><a href="#cb5-17" aria-hidden="true" tabindex="-1"></a>            <span class="at">stool_hexanoicAcid       =</span> <span class="fu">mean</span>(stool_hexanoicAcid, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
+<span id="cb5-18"><a href="#cb5-18" aria-hidden="true" tabindex="-1"></a>            <span class="at">blood_isobutyricAcid     =</span> <span class="fu">mean</span>(blood_isobutyricAcid, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
+<span id="cb5-19"><a href="#cb5-19" aria-hidden="true" tabindex="-1"></a>            <span class="at">stool_isobutyricAcid     =</span> <span class="fu">mean</span>(stool_isobutyricAcid, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
+<span id="cb5-20"><a href="#cb5-20" aria-hidden="true" tabindex="-1"></a>            <span class="at">blood_isovalericAcid     =</span> <span class="fu">mean</span>(blood_isovalericAcid, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
+<span id="cb5-21"><a href="#cb5-21" aria-hidden="true" tabindex="-1"></a>            <span class="at">stool_isovalericAcid     =</span> <span class="fu">mean</span>(stool_isovalericAcid, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
+<span id="cb5-22"><a href="#cb5-22" aria-hidden="true" tabindex="-1"></a>            <span class="at">blood_methylbutyricAcid  =</span> <span class="fu">mean</span>(blood_methylbutyricAcid, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
+<span id="cb5-23"><a href="#cb5-23" aria-hidden="true" tabindex="-1"></a>            <span class="at">stool_methylbutyricAcid  =</span> <span class="fu">mean</span>(stool_methylbutyricAcid, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
+<span id="cb5-24"><a href="#cb5-24" aria-hidden="true" tabindex="-1"></a>            <span class="at">richness_hill            =</span> <span class="fu">mean</span>(richness_hill, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
+<span id="cb5-25"><a href="#cb5-25" aria-hidden="true" tabindex="-1"></a>            <span class="at">richness_observed        =</span> <span class="fu">mean</span>(richness_observed, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
+<span id="cb5-26"><a href="#cb5-26" aria-hidden="true" tabindex="-1"></a>            <span class="at">evenness_pielou          =</span> <span class="fu">mean</span>(evenness_pielou, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
+<span id="cb5-27"><a href="#cb5-27" aria-hidden="true" tabindex="-1"></a>            <span class="at">evenness_simpson         =</span> <span class="fu">mean</span>(evenness_simpson, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
+<span id="cb5-28"><a href="#cb5-28" aria-hidden="true" tabindex="-1"></a>            <span class="at">diversity_shannon        =</span> <span class="fu">mean</span>(diversity_shannon, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
+<span id="cb5-29"><a href="#cb5-29" aria-hidden="true" tabindex="-1"></a>            <span class="at">diversity_invSimpson     =</span> <span class="fu">mean</span>(diversity_invSimpson, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
+<span id="cb5-30"><a href="#cb5-30" aria-hidden="true" tabindex="-1"></a>            <span class="at">dominance_dbp            =</span> <span class="fu">mean</span>(dominance_dbp, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
+<span id="cb5-31"><a href="#cb5-31" aria-hidden="true" tabindex="-1"></a>            <span class="at">dominance_coreAbundance  =</span> <span class="fu">mean</span>(dominance_coreAbundance, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
+<span id="cb5-32"><a href="#cb5-32" aria-hidden="true" tabindex="-1"></a>            <span class="at">rarity_logModuloSkewness =</span> <span class="fu">mean</span>(rarity_logModuloSkewness, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
+<span id="cb5-33"><a href="#cb5-33" aria-hidden="true" tabindex="-1"></a>            <span class="at">divergence_toMedian      =</span> <span class="fu">mean</span>(divergence_toMedian, <span class="at">na.rm =</span> <span class="cn">TRUE</span>))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </details>
 </div>
 </section>
 <section id="description" class="level1 page-columns page-full">
 <h1>Description</h1>
-<section id="table-showing-median-values-for-metric-variables" class="level5 page-columns page-full">
-<h5 class="anchored" data-anchor-id="table-showing-median-values-for-metric-variables">Table showing median values for metric variables</h5>
+<section id="table-showing-mean-values-for-metric-variables" class="level5 page-columns page-full">
+<h5 class="anchored" data-anchor-id="table-showing-mean-values-for-metric-variables">Table showing mean values for metric variables</h5>
 <div class="cell">
 <details>
 <summary>Code</summary>
@@ -3393,29 +3401,37 @@ border: 0;
 <span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a>create_subgroupDescription <span class="ot">&lt;-</span> <span class="cf">function</span>(dat_subgroup) {</span>
 <span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a>  </span>
 <span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">data.frame</span>(<span class="at">n                        =</span> <span class="fu">nrow</span>(dat_subgroup),</span>
-<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a>             <span class="at">age                      =</span> <span class="fu">median</span>(dat_subgroup<span class="sc">$</span>age) <span class="sc">%&gt;%</span> <span class="fu">round</span>(),</span>
+<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a>             <span class="at">age                      =</span> <span class="fu">mean</span>(dat_subgroup<span class="sc">$</span>age) <span class="sc">%&gt;%</span> <span class="fu">round</span>(),</span>
 <span id="cb6-6"><a href="#cb6-6" aria-hidden="true" tabindex="-1"></a>             <span class="at">gender_male              =</span> <span class="fu">paste0</span>(<span class="fu">round</span>(<span class="dv">100</span> <span class="sc">*</span> <span class="fu">prop.table</span>(<span class="fu">table</span>(dat_subgroup<span class="sc">$</span>gender))[<span class="st">&quot;M&quot;</span>]), <span class="st">&quot;%&quot;</span>),</span>
-<span id="cb6-7"><a href="#cb6-7" aria-hidden="true" tabindex="-1"></a>             <span class="at">BMI                      =</span> <span class="fu">median</span>(dat_subgroup<span class="sc">$</span>bmi_t0)                   <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">1</span>),</span>
-<span id="cb6-8"><a href="#cb6-8" aria-hidden="true" tabindex="-1"></a>             <span class="at">hipWaistRatio            =</span> <span class="fu">median</span>(dat_subgroup<span class="sc">$</span>hipWaistRatio_t0, <span class="at">na.rm =</span> <span class="cn">TRUE</span>) <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">2</span>),</span>
-<span id="cb6-9"><a href="#cb6-9" aria-hidden="true" tabindex="-1"></a>             <span class="at">blood_aceticAcid         =</span> <span class="fu">median</span>(dat_subgroup<span class="sc">$</span>blood_aceticAcid)               <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">1</span>),</span>
-<span id="cb6-10"><a href="#cb6-10" aria-hidden="true" tabindex="-1"></a>             <span class="at">blood_propionicAcid      =</span> <span class="fu">median</span>(dat_subgroup<span class="sc">$</span>blood_propionicAcid)            <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">1</span>),</span>
-<span id="cb6-11"><a href="#cb6-11" aria-hidden="true" tabindex="-1"></a>             <span class="at">blood_butyricAcid        =</span> <span class="fu">median</span>(dat_subgroup<span class="sc">$</span>blood_butyricAcid)              <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">1</span>),</span>
-<span id="cb6-12"><a href="#cb6-12" aria-hidden="true" tabindex="-1"></a>             <span class="at">blood_valericAcid        =</span> <span class="fu">median</span>(dat_subgroup<span class="sc">$</span>blood_valericAcid)              <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">1</span>),</span>
-<span id="cb6-13"><a href="#cb6-13" aria-hidden="true" tabindex="-1"></a>             <span class="at">blood_hexanoicAcid       =</span> <span class="fu">median</span>(dat_subgroup<span class="sc">$</span>blood_hexanoicAcid)             <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">1</span>),</span>
-<span id="cb6-14"><a href="#cb6-14" aria-hidden="true" tabindex="-1"></a>             <span class="at">blood_isobutyricAcid     =</span> <span class="fu">median</span>(dat_subgroup<span class="sc">$</span>blood_isobutyricAcid)           <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">1</span>),</span>
-<span id="cb6-15"><a href="#cb6-15" aria-hidden="true" tabindex="-1"></a>             <span class="at">blood_isovalericAcid     =</span> <span class="fu">median</span>(dat_subgroup<span class="sc">$</span>blood_isovalericAcid)           <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">1</span>),</span>
-<span id="cb6-16"><a href="#cb6-16" aria-hidden="true" tabindex="-1"></a>             <span class="at">blood_methylbutyricAcid  =</span> <span class="fu">median</span>(dat_subgroup<span class="sc">$</span>blood_methylbutyricAcid)        <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">1</span>),</span>
-<span id="cb6-17"><a href="#cb6-17" aria-hidden="true" tabindex="-1"></a>             <span class="at">richness_hill            =</span> <span class="fu">median</span>(dat_subgroup<span class="sc">$</span>richness_hill)            <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">1</span>),</span>
-<span id="cb6-18"><a href="#cb6-18" aria-hidden="true" tabindex="-1"></a>             <span class="at">richness_observed        =</span> <span class="fu">median</span>(dat_subgroup<span class="sc">$</span>richness_observed)        <span class="sc">%&gt;%</span> <span class="fu">round</span>(),</span>
-<span id="cb6-19"><a href="#cb6-19" aria-hidden="true" tabindex="-1"></a>             <span class="at">evenness_pielou          =</span> <span class="fu">median</span>(dat_subgroup<span class="sc">$</span>evenness_pielou)          <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">2</span>),</span>
-<span id="cb6-20"><a href="#cb6-20" aria-hidden="true" tabindex="-1"></a>             <span class="at">evenness_simpson         =</span> <span class="fu">median</span>(dat_subgroup<span class="sc">$</span>evenness_simpson)         <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">2</span>),</span>
-<span id="cb6-21"><a href="#cb6-21" aria-hidden="true" tabindex="-1"></a>             <span class="at">diversity_shannon        =</span> <span class="fu">median</span>(dat_subgroup<span class="sc">$</span>diversity_shannon)        <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">2</span>),</span>
-<span id="cb6-22"><a href="#cb6-22" aria-hidden="true" tabindex="-1"></a>             <span class="at">diversity_invSimpson     =</span> <span class="fu">median</span>(dat_subgroup<span class="sc">$</span>diversity_invSimpson)     <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">1</span>),</span>
-<span id="cb6-23"><a href="#cb6-23" aria-hidden="true" tabindex="-1"></a>             <span class="at">dominance_dbp            =</span> <span class="fu">median</span>(dat_subgroup<span class="sc">$</span>dominance_dbp)            <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">2</span>),</span>
-<span id="cb6-24"><a href="#cb6-24" aria-hidden="true" tabindex="-1"></a>             <span class="at">dominance_coreAbundance  =</span> <span class="fu">median</span>(dat_subgroup<span class="sc">$</span>dominance_coreAbundance)  <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">2</span>),</span>
-<span id="cb6-25"><a href="#cb6-25" aria-hidden="true" tabindex="-1"></a>             <span class="at">rarity_logModuloSkewness =</span> <span class="fu">median</span>(dat_subgroup<span class="sc">$</span>rarity_logModuloSkewness) <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">2</span>),</span>
-<span id="cb6-26"><a href="#cb6-26" aria-hidden="true" tabindex="-1"></a>             <span class="at">divergence_toMedian      =</span> <span class="fu">median</span>(dat_subgroup<span class="sc">$</span>divergence_toMedian)      <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">2</span>))</span>
-<span id="cb6-27"><a href="#cb6-27" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<span id="cb6-7"><a href="#cb6-7" aria-hidden="true" tabindex="-1"></a>             <span class="at">BMI                      =</span> <span class="fu">mean</span>(dat_subgroup<span class="sc">$</span>bmi_t0)                   <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">1</span>),</span>
+<span id="cb6-8"><a href="#cb6-8" aria-hidden="true" tabindex="-1"></a>             <span class="at">hipWaistRatio            =</span> <span class="fu">mean</span>(dat_subgroup<span class="sc">$</span>hipWaistRatio_t0, <span class="at">na.rm =</span> <span class="cn">TRUE</span>) <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">2</span>),</span>
+<span id="cb6-9"><a href="#cb6-9" aria-hidden="true" tabindex="-1"></a>             <span class="at">blood_aceticAcid         =</span> <span class="fu">mean</span>(dat_subgroup<span class="sc">$</span>blood_aceticAcid)               <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">1</span>),</span>
+<span id="cb6-10"><a href="#cb6-10" aria-hidden="true" tabindex="-1"></a>             <span class="at">stool_aceticAcid         =</span> <span class="fu">mean</span>(dat_subgroup<span class="sc">$</span>stool_aceticAcid)               <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">1</span>),</span>
+<span id="cb6-11"><a href="#cb6-11" aria-hidden="true" tabindex="-1"></a>             <span class="at">blood_propionicAcid      =</span> <span class="fu">mean</span>(dat_subgroup<span class="sc">$</span>blood_propionicAcid)            <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">1</span>),</span>
+<span id="cb6-12"><a href="#cb6-12" aria-hidden="true" tabindex="-1"></a>             <span class="at">stool_propionicAcid      =</span> <span class="fu">mean</span>(dat_subgroup<span class="sc">$</span>stool_propionicAcid)            <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">1</span>),</span>
+<span id="cb6-13"><a href="#cb6-13" aria-hidden="true" tabindex="-1"></a>             <span class="at">blood_butyricAcid        =</span> <span class="fu">mean</span>(dat_subgroup<span class="sc">$</span>blood_butyricAcid)              <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">1</span>),</span>
+<span id="cb6-14"><a href="#cb6-14" aria-hidden="true" tabindex="-1"></a>             <span class="at">stool_butyricAcid        =</span> <span class="fu">mean</span>(dat_subgroup<span class="sc">$</span>stool_butyricAcid)              <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">1</span>),</span>
+<span id="cb6-15"><a href="#cb6-15" aria-hidden="true" tabindex="-1"></a>             <span class="at">blood_valericAcid        =</span> <span class="fu">mean</span>(dat_subgroup<span class="sc">$</span>blood_valericAcid)              <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">1</span>),</span>
+<span id="cb6-16"><a href="#cb6-16" aria-hidden="true" tabindex="-1"></a>             <span class="at">stool_valericAcid        =</span> <span class="fu">mean</span>(dat_subgroup<span class="sc">$</span>stool_valericAcid)              <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">1</span>),</span>
+<span id="cb6-17"><a href="#cb6-17" aria-hidden="true" tabindex="-1"></a>             <span class="at">blood_hexanoicAcid       =</span> <span class="fu">mean</span>(dat_subgroup<span class="sc">$</span>blood_hexanoicAcid)             <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">1</span>),</span>
+<span id="cb6-18"><a href="#cb6-18" aria-hidden="true" tabindex="-1"></a>             <span class="at">stool_hexanoicAcid       =</span> <span class="fu">mean</span>(dat_subgroup<span class="sc">$</span>stool_hexanoicAcid)             <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">1</span>),</span>
+<span id="cb6-19"><a href="#cb6-19" aria-hidden="true" tabindex="-1"></a>             <span class="at">blood_isobutyricAcid     =</span> <span class="fu">mean</span>(dat_subgroup<span class="sc">$</span>blood_isobutyricAcid)           <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">1</span>),</span>
+<span id="cb6-20"><a href="#cb6-20" aria-hidden="true" tabindex="-1"></a>             <span class="at">stool_isobutyricAcid     =</span> <span class="fu">mean</span>(dat_subgroup<span class="sc">$</span>stool_isobutyricAcid)           <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">1</span>),</span>
+<span id="cb6-21"><a href="#cb6-21" aria-hidden="true" tabindex="-1"></a>             <span class="at">blood_isovalericAcid     =</span> <span class="fu">mean</span>(dat_subgroup<span class="sc">$</span>blood_isovalericAcid)           <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">1</span>),</span>
+<span id="cb6-22"><a href="#cb6-22" aria-hidden="true" tabindex="-1"></a>             <span class="at">stool_isovalericAcid     =</span> <span class="fu">mean</span>(dat_subgroup<span class="sc">$</span>stool_isovalericAcid)           <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">1</span>),</span>
+<span id="cb6-23"><a href="#cb6-23" aria-hidden="true" tabindex="-1"></a>             <span class="at">blood_methylbutyricAcid  =</span> <span class="fu">mean</span>(dat_subgroup<span class="sc">$</span>blood_methylbutyricAcid)        <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">1</span>),</span>
+<span id="cb6-24"><a href="#cb6-24" aria-hidden="true" tabindex="-1"></a>             <span class="at">stool_methylbutyricAcid  =</span> <span class="fu">mean</span>(dat_subgroup<span class="sc">$</span>stool_methylbutyricAcid)        <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">1</span>),</span>
+<span id="cb6-25"><a href="#cb6-25" aria-hidden="true" tabindex="-1"></a>             <span class="at">richness_hill            =</span> <span class="fu">mean</span>(dat_subgroup<span class="sc">$</span>richness_hill)            <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">1</span>),</span>
+<span id="cb6-26"><a href="#cb6-26" aria-hidden="true" tabindex="-1"></a>             <span class="at">richness_observed        =</span> <span class="fu">mean</span>(dat_subgroup<span class="sc">$</span>richness_observed)        <span class="sc">%&gt;%</span> <span class="fu">round</span>(),</span>
+<span id="cb6-27"><a href="#cb6-27" aria-hidden="true" tabindex="-1"></a>             <span class="at">evenness_pielou          =</span> <span class="fu">mean</span>(dat_subgroup<span class="sc">$</span>evenness_pielou)          <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">2</span>),</span>
+<span id="cb6-28"><a href="#cb6-28" aria-hidden="true" tabindex="-1"></a>             <span class="at">evenness_simpson         =</span> <span class="fu">mean</span>(dat_subgroup<span class="sc">$</span>evenness_simpson)         <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">2</span>),</span>
+<span id="cb6-29"><a href="#cb6-29" aria-hidden="true" tabindex="-1"></a>             <span class="at">diversity_shannon        =</span> <span class="fu">mean</span>(dat_subgroup<span class="sc">$</span>diversity_shannon)        <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">2</span>),</span>
+<span id="cb6-30"><a href="#cb6-30" aria-hidden="true" tabindex="-1"></a>             <span class="at">diversity_invSimpson     =</span> <span class="fu">mean</span>(dat_subgroup<span class="sc">$</span>diversity_invSimpson)     <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">1</span>),</span>
+<span id="cb6-31"><a href="#cb6-31" aria-hidden="true" tabindex="-1"></a>             <span class="at">dominance_dbp            =</span> <span class="fu">mean</span>(dat_subgroup<span class="sc">$</span>dominance_dbp)            <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">2</span>),</span>
+<span id="cb6-32"><a href="#cb6-32" aria-hidden="true" tabindex="-1"></a>             <span class="at">dominance_coreAbundance  =</span> <span class="fu">mean</span>(dat_subgroup<span class="sc">$</span>dominance_coreAbundance)  <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">2</span>),</span>
+<span id="cb6-33"><a href="#cb6-33" aria-hidden="true" tabindex="-1"></a>             <span class="at">rarity_logModuloSkewness =</span> <span class="fu">mean</span>(dat_subgroup<span class="sc">$</span>rarity_logModuloSkewness) <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">2</span>),</span>
+<span id="cb6-34"><a href="#cb6-34" aria-hidden="true" tabindex="-1"></a>             <span class="at">divergence_toMedian      =</span> <span class="fu">mean</span>(dat_subgroup<span class="sc">$</span>divergence_toMedian)      <span class="sc">%&gt;%</span> <span class="fu">round</span>(<span class="dv">2</span>))</span>
+<span id="cb6-35"><a href="#cb6-35" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </details>
 </div>
 <div class="cell page-columns page-full">
@@ -3465,12 +3481,12 @@ border: 0;
 </tr>
 <tr class="even">
 <td style="text-align: left;">age</td>
-<td style="text-align: left;">32</td>
-<td style="text-align: left;">57</td>
-<td style="text-align: left;">38</td>
-<td style="text-align: left;">49</td>
-<td style="text-align: left;">40</td>
-<td style="text-align: left;">50</td>
+<td style="text-align: left;">33</td>
+<td style="text-align: left;">58</td>
+<td style="text-align: left;">44</td>
+<td style="text-align: left;">44</td>
+<td style="text-align: left;">43</td>
+<td style="text-align: left;">47</td>
 </tr>
 <tr class="odd">
 <td style="text-align: left;">gender_male</td>
@@ -3483,116 +3499,188 @@ border: 0;
 </tr>
 <tr class="even">
 <td style="text-align: left;">BMI</td>
-<td style="text-align: left;">23.6</td>
+<td style="text-align: left;">23.7</td>
 <td style="text-align: left;">24.5</td>
-<td style="text-align: left;">24.9</td>
-<td style="text-align: left;">22.7</td>
-<td style="text-align: left;">22.2</td>
-<td style="text-align: left;">27.1</td>
+<td style="text-align: left;">25.2</td>
+<td style="text-align: left;">23.3</td>
+<td style="text-align: left;">22.3</td>
+<td style="text-align: left;">27.3</td>
 </tr>
 <tr class="odd">
 <td style="text-align: left;">hipWaistRatio</td>
-<td style="text-align: left;">0.79</td>
+<td style="text-align: left;">0.81</td>
 <td style="text-align: left;">0.84</td>
-<td style="text-align: left;">0.87</td>
+<td style="text-align: left;">0.88</td>
 <td style="text-align: left;">0.78</td>
-<td style="text-align: left;">0.79</td>
+<td style="text-align: left;">0.81</td>
 <td style="text-align: left;">0.84</td>
 </tr>
 <tr class="even">
 <td style="text-align: left;">blood_aceticAcid</td>
-<td style="text-align: left;">2355.4</td>
-<td style="text-align: left;">3033.9</td>
-<td style="text-align: left;">2384.4</td>
-<td style="text-align: left;">2822.4</td>
-<td style="text-align: left;">2674.8</td>
-<td style="text-align: left;">2588.9</td>
+<td style="text-align: left;">2836.0</td>
+<td style="text-align: left;">3441.5</td>
+<td style="text-align: left;">3025.1</td>
+<td style="text-align: left;">3171.2</td>
+<td style="text-align: left;">3313.9</td>
+<td style="text-align: left;">2752.6</td>
 </tr>
 <tr class="odd">
+<td style="text-align: left;">stool_aceticAcid</td>
+<td style="text-align: left;">3511.8</td>
+<td style="text-align: left;">3158.3</td>
+<td style="text-align: left;">3636.1</td>
+<td style="text-align: left;">3134.1</td>
+<td style="text-align: left;">3310.8</td>
+<td style="text-align: left;">3426.6</td>
+</tr>
+<tr class="even">
 <td style="text-align: left;">blood_propionicAcid</td>
-<td style="text-align: left;">177.1</td>
-<td style="text-align: left;">171.5</td>
-<td style="text-align: left;">179.7</td>
-<td style="text-align: left;">165.0</td>
-<td style="text-align: left;">164.5</td>
-<td style="text-align: left;">184.9</td>
+<td style="text-align: left;">194.3</td>
+<td style="text-align: left;">177.8</td>
+<td style="text-align: left;">198.2</td>
+<td style="text-align: left;">178.1</td>
+<td style="text-align: left;">181.1</td>
+<td style="text-align: left;">196.8</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">stool_propionicAcid</td>
+<td style="text-align: left;">1322.2</td>
+<td style="text-align: left;">957.2</td>
+<td style="text-align: left;">1325.4</td>
+<td style="text-align: left;">1029.2</td>
+<td style="text-align: left;">1107.8</td>
+<td style="text-align: left;">1245.9</td>
 </tr>
 <tr class="even">
 <td style="text-align: left;">blood_butyricAcid</td>
-<td style="text-align: left;">101.0</td>
-<td style="text-align: left;">90.4</td>
-<td style="text-align: left;">99.8</td>
-<td style="text-align: left;">99.5</td>
-<td style="text-align: left;">99.9</td>
-<td style="text-align: left;">95.7</td>
+<td style="text-align: left;">110.0</td>
+<td style="text-align: left;">96.1</td>
+<td style="text-align: left;">101.9</td>
+<td style="text-align: left;">105.2</td>
+<td style="text-align: left;">103.7</td>
+<td style="text-align: left;">104.0</td>
 </tr>
 <tr class="odd">
+<td style="text-align: left;">stool_butyricAcid</td>
+<td style="text-align: left;">1361.6</td>
+<td style="text-align: left;">1053.4</td>
+<td style="text-align: left;">1355.2</td>
+<td style="text-align: left;">1121.3</td>
+<td style="text-align: left;">1207.7</td>
+<td style="text-align: left;">1250.4</td>
+</tr>
+<tr class="even">
 <td style="text-align: left;">blood_valericAcid</td>
+<td style="text-align: left;">8.7</td>
+<td style="text-align: left;">9.0</td>
+<td style="text-align: left;">8.4</td>
+<td style="text-align: left;">9.2</td>
 <td style="text-align: left;">8.1</td>
-<td style="text-align: left;">8.4</td>
-<td style="text-align: left;">8.4</td>
-<td style="text-align: left;">8.2</td>
-<td style="text-align: left;">8.0</td>
-<td style="text-align: left;">8.5</td>
+<td style="text-align: left;">10.0</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">stool_valericAcid</td>
+<td style="text-align: left;">216.2</td>
+<td style="text-align: left;">196.3</td>
+<td style="text-align: left;">212.1</td>
+<td style="text-align: left;">203.5</td>
+<td style="text-align: left;">195.0</td>
+<td style="text-align: left;">228.4</td>
 </tr>
 <tr class="even">
 <td style="text-align: left;">blood_hexanoicAcid</td>
-<td style="text-align: left;">44.3</td>
-<td style="text-align: left;">47.3</td>
-<td style="text-align: left;">40.3</td>
-<td style="text-align: left;">46.3</td>
-<td style="text-align: left;">45.6</td>
-<td style="text-align: left;">43.4</td>
+<td style="text-align: left;">44.5</td>
+<td style="text-align: left;">50.1</td>
+<td style="text-align: left;">44.2</td>
+<td style="text-align: left;">49.2</td>
+<td style="text-align: left;">47.9</td>
+<td style="text-align: left;">45.4</td>
 </tr>
 <tr class="odd">
+<td style="text-align: left;">stool_hexanoicAcid</td>
+<td style="text-align: left;">103.2</td>
+<td style="text-align: left;">111.5</td>
+<td style="text-align: left;">79.7</td>
+<td style="text-align: left;">128.0</td>
+<td style="text-align: left;">109.9</td>
+<td style="text-align: left;">101.8</td>
+</tr>
+<tr class="even">
 <td style="text-align: left;">blood_isobutyricAcid</td>
-<td style="text-align: left;">93.5</td>
-<td style="text-align: left;">98.8</td>
-<td style="text-align: left;">104.0</td>
-<td style="text-align: left;">89.2</td>
-<td style="text-align: left;">97.8</td>
-<td style="text-align: left;">94.3</td>
+<td style="text-align: left;">96.4</td>
+<td style="text-align: left;">95.4</td>
+<td style="text-align: left;">103.3</td>
+<td style="text-align: left;">90.3</td>
+<td style="text-align: left;">96.3</td>
+<td style="text-align: left;">95.3</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">stool_isobutyricAcid</td>
+<td style="text-align: left;">136.2</td>
+<td style="text-align: left;">138.0</td>
+<td style="text-align: left;">137.6</td>
+<td style="text-align: left;">136.6</td>
+<td style="text-align: left;">131.2</td>
+<td style="text-align: left;">147.1</td>
 </tr>
 <tr class="even">
 <td style="text-align: left;">blood_isovalericAcid</td>
-<td style="text-align: left;">59.0</td>
-<td style="text-align: left;">53.6</td>
-<td style="text-align: left;">57.8</td>
-<td style="text-align: left;">56.0</td>
-<td style="text-align: left;">53.6</td>
-<td style="text-align: left;">60.4</td>
+<td style="text-align: left;">59.7</td>
+<td style="text-align: left;">59.2</td>
+<td style="text-align: left;">63.5</td>
+<td style="text-align: left;">56.4</td>
+<td style="text-align: left;">57.4</td>
+<td style="text-align: left;">63.1</td>
 </tr>
 <tr class="odd">
+<td style="text-align: left;">stool_isovalericAcid</td>
+<td style="text-align: left;">135.3</td>
+<td style="text-align: left;">139.2</td>
+<td style="text-align: left;">135.6</td>
+<td style="text-align: left;">138.2</td>
+<td style="text-align: left;">132.2</td>
+<td style="text-align: left;">145.3</td>
+</tr>
+<tr class="even">
 <td style="text-align: left;">blood_methylbutyricAcid</td>
-<td style="text-align: left;">68.3</td>
-<td style="text-align: left;">62.8</td>
-<td style="text-align: left;">72.5</td>
-<td style="text-align: left;">64.7</td>
-<td style="text-align: left;">66.0</td>
-<td style="text-align: left;">69.6</td>
+<td style="text-align: left;">72.2</td>
+<td style="text-align: left;">62.9</td>
+<td style="text-align: left;">73.4</td>
+<td style="text-align: left;">63.8</td>
+<td style="text-align: left;">66.7</td>
+<td style="text-align: left;">70.3</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">stool_methylbutyricAcid</td>
+<td style="text-align: left;">101.8</td>
+<td style="text-align: left;">102.6</td>
+<td style="text-align: left;">100.8</td>
+<td style="text-align: left;">103.1</td>
+<td style="text-align: left;">97.6</td>
+<td style="text-align: left;">110.0</td>
 </tr>
 <tr class="even">
 <td style="text-align: left;">richness_hill</td>
-<td style="text-align: left;">45.7</td>
-<td style="text-align: left;">48.9</td>
-<td style="text-align: left;">46.6</td>
-<td style="text-align: left;">47.3</td>
-<td style="text-align: left;">48.3</td>
 <td style="text-align: left;">44.2</td>
+<td style="text-align: left;">50.4</td>
+<td style="text-align: left;">46.5</td>
+<td style="text-align: left;">47.3</td>
+<td style="text-align: left;">47.7</td>
+<td style="text-align: left;">45.7</td>
 </tr>
 <tr class="odd">
 <td style="text-align: left;">richness_observed</td>
-<td style="text-align: left;">167</td>
-<td style="text-align: left;">188</td>
-<td style="text-align: left;">162</td>
-<td style="text-align: left;">178</td>
-<td style="text-align: left;">178</td>
-<td style="text-align: left;">167</td>
+<td style="text-align: left;">164</td>
+<td style="text-align: left;">184</td>
+<td style="text-align: left;">164</td>
+<td style="text-align: left;">180</td>
+<td style="text-align: left;">173</td>
+<td style="text-align: left;">172</td>
 </tr>
 <tr class="even">
 <td style="text-align: left;">evenness_pielou</td>
 <td style="text-align: left;">0.74</td>
-<td style="text-align: left;">0.75</td>
+<td style="text-align: left;">0.74</td>
 <td style="text-align: left;">0.75</td>
 <td style="text-align: left;">0.74</td>
 <td style="text-align: left;">0.74</td>
@@ -3600,48 +3688,48 @@ border: 0;
 </tr>
 <tr class="odd">
 <td style="text-align: left;">evenness_simpson</td>
-<td style="text-align: left;">0.15</td>
-<td style="text-align: left;">0.15</td>
 <td style="text-align: left;">0.16</td>
 <td style="text-align: left;">0.15</td>
+<td style="text-align: left;">0.17</td>
 <td style="text-align: left;">0.15</td>
+<td style="text-align: left;">0.16</td>
 <td style="text-align: left;">0.15</td>
 </tr>
 <tr class="even">
 <td style="text-align: left;">diversity_shannon</td>
-<td style="text-align: left;">3.82</td>
-<td style="text-align: left;">3.88</td>
-<td style="text-align: left;">3.84</td>
-<td style="text-align: left;">3.85</td>
+<td style="text-align: left;">3.75</td>
 <td style="text-align: left;">3.86</td>
+<td style="text-align: left;">3.78</td>
+<td style="text-align: left;">3.81</td>
+<td style="text-align: left;">3.82</td>
 <td style="text-align: left;">3.78</td>
 </tr>
 <tr class="odd">
 <td style="text-align: left;">diversity_invSimpson</td>
-<td style="text-align: left;">26.0</td>
-<td style="text-align: left;">28.8</td>
-<td style="text-align: left;">28.4</td>
-<td style="text-align: left;">26.1</td>
-<td style="text-align: left;">28.1</td>
-<td style="text-align: left;">25.6</td>
+<td style="text-align: left;">25.7</td>
+<td style="text-align: left;">28.2</td>
+<td style="text-align: left;">27.3</td>
+<td style="text-align: left;">26.5</td>
+<td style="text-align: left;">27.6</td>
+<td style="text-align: left;">25.5</td>
 </tr>
 <tr class="even">
 <td style="text-align: left;">dominance_dbp</td>
-<td style="text-align: left;">0.11</td>
-<td style="text-align: left;">0.11</td>
-<td style="text-align: left;">0.11</td>
-<td style="text-align: left;">0.11</td>
-<td style="text-align: left;">0.11</td>
 <td style="text-align: left;">0.12</td>
+<td style="text-align: left;">0.12</td>
+<td style="text-align: left;">0.12</td>
+<td style="text-align: left;">0.12</td>
+<td style="text-align: left;">0.11</td>
+<td style="text-align: left;">0.13</td>
 </tr>
 <tr class="odd">
 <td style="text-align: left;">dominance_coreAbundance</td>
-<td style="text-align: left;">0.84</td>
+<td style="text-align: left;">0.82</td>
+<td style="text-align: left;">0.76</td>
+<td style="text-align: left;">0.80</td>
+<td style="text-align: left;">0.79</td>
+<td style="text-align: left;">0.80</td>
 <td style="text-align: left;">0.78</td>
-<td style="text-align: left;">0.80</td>
-<td style="text-align: left;">0.81</td>
-<td style="text-align: left;">0.81</td>
-<td style="text-align: left;">0.80</td>
 </tr>
 <tr class="even">
 <td style="text-align: left;">rarity_logModuloSkewness</td>
@@ -3654,12 +3742,12 @@ border: 0;
 </tr>
 <tr class="odd">
 <td style="text-align: left;">divergence_toMedian</td>
-<td style="text-align: left;">0.55</td>
-<td style="text-align: left;">0.57</td>
-<td style="text-align: left;">0.54</td>
-<td style="text-align: left;">0.57</td>
-<td style="text-align: left;">0.55</td>
 <td style="text-align: left;">0.56</td>
+<td style="text-align: left;">0.58</td>
+<td style="text-align: left;">0.56</td>
+<td style="text-align: left;">0.57</td>
+<td style="text-align: left;">0.57</td>
+<td style="text-align: left;">0.57</td>
 </tr>
 </tbody>
 </table>
