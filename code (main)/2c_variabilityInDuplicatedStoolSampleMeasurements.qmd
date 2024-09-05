@@ -13,9 +13,12 @@ format:
 #| warning: false
 
 library(sauerkrautTaxonomyBuddy)
+library(SummarizedExperiment) # microbiome analysis
+library(mia)                  # microbiome analysis
 
 library(dplyr)      # data handling
 library(tidyr)      # data transformation
+library(readxl)     # read Excel files
 library(ggplot2)    # data visualization
 library(knitr)      # table printing
 library(kableExtra) # kable styling
@@ -28,6 +31,8 @@ theme_set(theme_minimal()) # set ggplot2 theme
 ```{r set file paths}
 define_dataPaths()
 ```
+
+##### Prepare species' abundances
 
 ```{r read data}
 #| message: false
@@ -58,7 +63,87 @@ dat_stoolOrigTax <- dat_stoolOrigTax %>%
   select(-row_sum, -row_isZero)
 ```
 
-## Check reliability
+
+##### Prepare blood SCFAs
+
+```{r}
+#| warning: false
+
+# 1) read data
+dat_bloodSCFA <- readxl::read_excel(path_bloodMetabolomeXlsx, na = "< 0") %>% 
+    select("Client Sample ID", Analyte, "Results (ng/mL)") %>% 
+    dplyr::rename(sample_id = "Client Sample ID",
+                  results   = "Results (ng/mL)") %>% 
+    mutate(results = case_when(is.na(results) ~ 0.01,
+                               TRUE           ~ results),
+           Analyte = tolower(Analyte),
+           Analyte = gsub("2-", "", Analyte),
+           Analyte = gsub(" ", "", Analyte),
+           Analyte = gsub("acid", "Acid", Analyte),
+           Analyte = paste0("blood_", Analyte)) %>% 
+    tidyr::pivot_wider(values_from = results, id_cols = sample_id, names_from = Analyte)
+
+# 2) prepare the lookup file
+dat_lookupBlood <- read_excel(path_sampleLookupXlsx,
+                              sheet = "Duplikat Serum-Metabolon") %>% 
+  dplyr::rename(sampleID_reference   = "Sample Number",
+                sampleID_origAndDupl = "Duplikat Serum-Metabolon") %>% 
+  select(starts_with("sampleID")) %>% 
+  filter(!is.na(sampleID_origAndDupl)) %>% 
+  group_by(sampleID_reference) %>% 
+  mutate(obs_type = c("orig", "dupl")) %>% 
+  ungroup()
+
+# 3) split the original and duplicate data
+dat_bloodSCFA <- dat_bloodSCFA %>% 
+  filter(sample_id %in% dat_lookupBlood$sampleID_origAndDupl) %>% 
+  mutate(sample_id = as.character(sample_id)) %>% 
+  dplyr::left_join(dat_lookupBlood, by = c("sample_id" = "sampleID_origAndDupl")) %>% 
+  select(-sample_id) %>% 
+  select(sampleID_reference, obs_type, everything())
+dat_bloodOrig <- dat_bloodSCFA %>% filter(obs_type == "orig")
+dat_bloodDupl <- dat_bloodSCFA %>% filter(obs_type == "dupl")
+```
+
+
+##### Prepare stool SCFAs
+
+```{r}
+#| warning: false
+
+# 1) read data
+dat_stoolSCFA <- readxl::read_excel(path_stoolMetabolomeXlsx) %>% 
+  select("Client Sample ID", Analyte, Results) %>% 
+    dplyr::rename(sample_id = "Client Sample ID") %>% 
+    mutate(sample_id = as.numeric(sample_id),
+           Analyte   = tolower(Analyte),
+           Analyte   = gsub("2-", "", Analyte),
+           Analyte   = gsub(" ", "", Analyte),
+           Analyte   = gsub("acid", "Acid", Analyte),
+           Analyte   = paste0("stool_", Analyte)) %>% 
+    tidyr::pivot_wider(values_from = Results, id_cols = sample_id, names_from = Analyte)
+
+# 2) prepare the lookup file
+dat_lookupStool <- read_excel(path_sampleLookupXlsx,
+                              sheet = "Duplikat Stuhl-Metabolon") %>% 
+  dplyr::rename(sampleID_orig = "Sample Number",
+                sampleID_dupl = "Duplikat Stuhl-Metabolon") %>% 
+  select(starts_with("sampleID"))
+
+# 3) split the original and duplicate data
+dat_stoolOrig <- dat_stoolSCFA %>% 
+  filter(sample_id %in% dat_lookupStool$sampleID_orig) %>% 
+  dplyr::rename(sampleID_orig = sample_id)
+dat_stoolDupl <- dat_stoolSCFA %>% 
+  filter(sample_id %in% dat_lookupStool$sampleID_dupl) %>% 
+  mutate(sample_id = as.character(sample_id)) %>% 
+  dplyr::left_join(dat_lookupStool, by = c("sample_id" = "sampleID_dupl")) %>% 
+  select(-sample_id) %>% 
+  select(sampleID_orig, everything())
+```
+
+
+## Check reliability of species' abundances
 
 Intra-observer reliability
 
@@ -201,3 +286,198 @@ data.frame(species = names(icc_vector),
   kable(digits = 2) %>% 
   kable_styling()
 ```
+
+
+## Check reliability of blood SCFAs
+
+Intra-observer reliability
+
+**Correlations per sample**
+
+```{r}
+# calculate correlations
+dat_corr <- data.frame(marker      = c("methylbutyric acid", "acetic acid", "butyric acid", "hexanoic acid",
+                                       "isobutyric acid", "isovaleric acid", "propionic acid", "valeric acid"),
+                       correlation = c(cor(x = dat_bloodOrig$blood_methylbutyricAcid,
+                                           y = dat_bloodDupl$blood_methylbutyricAcid),
+                                       cor(x = dat_bloodOrig$blood_aceticAcid,
+                                           y = dat_bloodDupl$blood_aceticAcid),
+                                       cor(x = dat_bloodOrig$blood_butyricAcid,
+                                           y = dat_bloodDupl$blood_butyricAcid),
+                                       cor(x = dat_bloodOrig$blood_hexanoicAcid,
+                                           y = dat_bloodDupl$blood_hexanoicAcid),
+                                       cor(x = dat_bloodOrig$blood_isobutyricAcid,
+                                           y = dat_bloodDupl$blood_isobutyricAcid),
+                                       cor(x = dat_bloodOrig$blood_isovalericAcid,
+                                           y = dat_bloodDupl$blood_isovalericAcid),
+                                       cor(x = dat_bloodOrig$blood_propionicAcid,
+                                           y = dat_bloodDupl$blood_propionicAcid),
+                                       cor(x = dat_bloodOrig$blood_valericAcid,
+                                           y = dat_bloodDupl$blood_valericAcid)))
+
+dat_corr %>% 
+  mutate(correlation = round(correlation, 2)) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+Average correlation: `r dat_corr$correlation %>% mean() %>% round(2)`
+
+
+**Intra-Class Correlation**
+
+We estimate one ICC for every one of the 8 markers.  
+For each marker we first estimate the following linear mixed regression model:
+
+- dependent variable: marker value
+- independent variables: sample indicator (as fixed effect), binary indicator if 'original' or 'duplicated' sample (as random effect).
+
+Based on this model we then estimate the ICC based on the random effect variance $\sigma^2_\delta$ and the residual variance $\sigma^2_\epsilon$:
+$$
+\frac{\sigma^2_\delta}{\sigma^2_\delta + \sigma^2_\epsilon}
+$$
+
+```{r}
+# create a joint dataset for the model estimation
+datJoint_blood <- dat_bloodOrig %>% 
+  dplyr::bind_rows(dat_bloodDupl) %>% 
+  mutate(sampleID_reference = factor(sampleID_reference),
+         obs_type           = factor(obs_type))
+
+# model estimation
+model_mbA <- gam(blood_methylbutyricAcid ~ sampleID_reference + s(obs_type, bs = "re"), data = datJoint_blood)
+model_acA <- gam(blood_aceticAcid        ~ sampleID_reference + s(obs_type, bs = "re"), data = datJoint_blood)
+model_btA <- gam(blood_butyricAcid       ~ sampleID_reference + s(obs_type, bs = "re"), data = datJoint_blood)
+model_hxA <- gam(blood_hexanoicAcid      ~ sampleID_reference + s(obs_type, bs = "re"), data = datJoint_blood)
+model_ibA <- gam(blood_isobutyricAcid    ~ sampleID_reference + s(obs_type, bs = "re"), data = datJoint_blood)
+model_ivA <- gam(blood_isovalericAcid    ~ sampleID_reference + s(obs_type, bs = "re"), data = datJoint_blood)
+model_ppA <- gam(blood_propionicAcid     ~ sampleID_reference + s(obs_type, bs = "re"), data = datJoint_blood)
+model_vlA <- gam(blood_valericAcid       ~ sampleID_reference + s(obs_type, bs = "re"), data = datJoint_blood)
+
+# helper function to calculate the ICC
+calc_ICC <- function(model) {
+  sigma2 <- model$sig2
+  delta  <- mgcv::gam.vcomp(model) %>% unname()
+  delta2 <- delta^2
+  icc    <- delta2 / (delta2 + sigma2)
+  return(icc)
+}
+
+# create an overview table
+dat_ICC <- data.frame(marker = c("methylbutyric acid", "acetic acid", "butyric acid", "hexanoic acid",
+                                       "isobutyric acid", "isovaleric acid", "propionic acid", "valeric acid"),
+                      ICC    = c(calc_ICC(model_mbA),
+                                 calc_ICC(model_acA),
+                                 calc_ICC(model_btA),
+                                 calc_ICC(model_hxA),
+                                 calc_ICC(model_ibA),
+                                 calc_ICC(model_ivA),
+                                 calc_ICC(model_ppA),
+                                 calc_ICC(model_vlA)))
+
+dat_ICC %>% 
+  mutate(ICC = round(ICC, 2)) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+Average ICC blood: `r dat_ICC$ICC %>% mean() %>% round(2)`  
+
+
+## Check reliability of stool SCFAs
+
+Intra-observer reliability
+
+**Correlations per sample**
+
+```{r}
+# calculate correlations
+dat_corr <- data.frame(marker      = c("methylbutyric acid", "acetic acid", "butyric acid", "hexanoic acid",
+                                       "isobutyric acid", "isovaleric acid", "propionic acid", "valeric acid"),
+                       correlation = c(cor(x = dat_stoolOrig$stool_methylbutyricAcid,
+                                           y = dat_stoolDupl$stool_methylbutyricAcid),
+                                       cor(x = dat_stoolOrig$stool_aceticAcid,
+                                           y = dat_stoolDupl$stool_aceticAcid),
+                                       cor(x = dat_stoolOrig$stool_butyricAcid,
+                                           y = dat_stoolDupl$stool_butyricAcid),
+                                       cor(x = dat_stoolOrig$stool_hexanoicAcid,
+                                           y = dat_stoolDupl$stool_hexanoicAcid),
+                                       cor(x = dat_stoolOrig$stool_isobutyricAcid,
+                                           y = dat_stoolDupl$stool_isobutyricAcid),
+                                       cor(x = dat_stoolOrig$stool_isovalericAcid,
+                                           y = dat_stoolDupl$stool_isovalericAcid),
+                                       cor(x = dat_stoolOrig$stool_propionicAcid,
+                                           y = dat_stoolDupl$stool_propionicAcid),
+                                       cor(x = dat_stoolOrig$stool_valericAcid,
+                                           y = dat_stoolDupl$stool_valericAcid)))
+
+dat_corr %>% 
+  mutate(correlation = round(correlation, 2)) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+Average correlation: `r dat_corr$correlation %>% mean() %>% round(2)`
+
+
+**Intra-Class Correlation**
+
+NOTE: ICC estimation is quite unstable cause of the limited number of duplicate measurements, and because of the often near perfect correlations (see above) which lead to only very little remaining unexplained rest variability in the ICC models.
+
+We estimate one ICC for every one of the 8 markers.  
+For each marker we first estimate the following linear mixed regression model:
+
+- dependent variable: marker value
+- independent variables: sample indicator (as fixed effect), binary indicator if 'original' or 'duplicated' sample (as random effect).
+
+Based on this model we then estimate the ICC based on the random effect variance $\sigma^2_\delta$ and the residual variance $\sigma^2_\epsilon$:
+$$
+\frac{\sigma^2_\delta}{\sigma^2_\delta + \sigma^2_\epsilon}
+$$
+
+```{r}
+# create a joint dataset for the model estimation
+datJoint_stool <- dat_stoolOrig %>% 
+  mutate(obs_type = "orig") %>% 
+  dplyr::bind_rows(dat_stoolDupl %>% mutate(obs_type = "dupl")) %>% 
+  mutate(sampleID_orig = factor(sampleID_orig),
+         obs_type      = factor(obs_type))
+
+# model estimation
+model_mbA <- gam(stool_methylbutyricAcid ~ sampleID_orig + s(obs_type, bs = "re"), data = datJoint_stool)
+model_acA <- gam(stool_aceticAcid        ~ sampleID_orig + s(obs_type, bs = "re"), data = datJoint_stool)
+model_btA <- gam(stool_butyricAcid       ~ sampleID_orig + s(obs_type, bs = "re"), data = datJoint_stool)
+model_hxA <- gam(stool_hexanoicAcid      ~ sampleID_orig + s(obs_type, bs = "re"), data = datJoint_stool)
+model_ibA <- gam(stool_isobutyricAcid    ~ sampleID_orig + s(obs_type, bs = "re"), data = datJoint_stool)
+model_ivA <- gam(stool_isovalericAcid    ~ sampleID_orig + s(obs_type, bs = "re"), data = datJoint_stool)
+model_ppA <- gam(stool_propionicAcid     ~ sampleID_orig + s(obs_type, bs = "re"), data = datJoint_stool)
+model_vlA <- gam(stool_valericAcid       ~ sampleID_orig + s(obs_type, bs = "re"), data = datJoint_stool)
+
+# helper function to calculate the ICC
+calc_ICC <- function(model) {
+  sigma2 <- model$sig2
+  delta  <- mgcv::gam.vcomp(model) %>% unname()
+  delta2 <- delta^2
+  icc    <- delta2 / (delta2 + sigma2)
+  return(icc)
+}
+
+# create an overview table
+dat_ICC <- data.frame(marker = c("methylbutyric acid", "acetic acid", "butyric acid", "hexanoic acid",
+                                       "isobutyric acid", "isovaleric acid", "propionic acid", "valeric acid"),
+                      ICC    = c(calc_ICC(model_mbA),
+                                 calc_ICC(model_acA),
+                                 calc_ICC(model_btA),
+                                 calc_ICC(model_hxA),
+                                 calc_ICC(model_ibA),
+                                 calc_ICC(model_ivA),
+                                 calc_ICC(model_ppA),
+                                 calc_ICC(model_vlA)))
+
+dat_ICC %>% 
+  mutate(ICC = round(ICC, 2)) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+Average ICC stool: `r dat_ICC$ICC %>% mean() %>% round(2)`  

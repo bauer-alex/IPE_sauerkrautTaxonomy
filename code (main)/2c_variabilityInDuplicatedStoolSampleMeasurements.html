@@ -3260,7 +3260,9 @@ border: 0;
    
   <ul>
   <li><a href="#data-preparation" id="toc-data-preparation" class="nav-link active" data-scroll-target="#data-preparation">Data preparation</a></li>
-  <li><a href="#check-reliability" id="toc-check-reliability" class="nav-link" data-scroll-target="#check-reliability">Check reliability</a></li>
+  <li><a href="#check-reliability-of-species-abundances" id="toc-check-reliability-of-species-abundances" class="nav-link" data-scroll-target="#check-reliability-of-species-abundances">Check reliability of species’ abundances</a></li>
+  <li><a href="#check-reliability-of-blood-scfas" id="toc-check-reliability-of-blood-scfas" class="nav-link" data-scroll-target="#check-reliability-of-blood-scfas">Check reliability of blood SCFAs</a></li>
+  <li><a href="#check-reliability-of-stool-scfas" id="toc-check-reliability-of-stool-scfas" class="nav-link" data-scroll-target="#check-reliability-of-stool-scfas">Check reliability of stool SCFAs</a></li>
   </ul>
 </nav>
 </div>
@@ -3289,16 +3291,19 @@ border: 0;
 <details>
 <summary>Code</summary>
 <div class="sourceCode cell-code" id="cb1"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(sauerkrautTaxonomyBuddy)</span>
-<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(dplyr)      <span class="co"># data handling</span></span>
-<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(tidyr)      <span class="co"># data transformation</span></span>
-<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(ggplot2)    <span class="co"># data visualization</span></span>
-<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(knitr)      <span class="co"># table printing</span></span>
-<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(kableExtra) <span class="co"># kable styling</span></span>
-<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(mgcv)       <span class="co"># regression models for ICC</span></span>
-<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a><span class="fu">theme_set</span>(<span class="fu">theme_minimal</span>()) <span class="co"># set ggplot2 theme</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(SummarizedExperiment) <span class="co"># microbiome analysis</span></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(mia)                  <span class="co"># microbiome analysis</span></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(dplyr)      <span class="co"># data handling</span></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(tidyr)      <span class="co"># data transformation</span></span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(readxl)     <span class="co"># read Excel files</span></span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(ggplot2)    <span class="co"># data visualization</span></span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(knitr)      <span class="co"># table printing</span></span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(kableExtra) <span class="co"># kable styling</span></span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(mgcv)       <span class="co"># regression models for ICC</span></span>
+<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a><span class="fu">theme_set</span>(<span class="fu">theme_minimal</span>()) <span class="co"># set ggplot2 theme</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </details>
 </div>
 <div class="cell">
@@ -3307,6 +3312,8 @@ border: 0;
 <div class="sourceCode cell-code" id="cb2"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="fu">define_dataPaths</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </details>
 </div>
+<section id="prepare-species-abundances" class="level5">
+<h5 class="anchored" data-anchor-id="prepare-species-abundances">Prepare species’ abundances</h5>
 <div class="cell">
 <details>
 <summary>Code</summary>
@@ -3339,60 +3346,140 @@ border: 0;
 </details>
 </div>
 </section>
-<section id="check-reliability" class="level2">
-<h2 class="anchored" data-anchor-id="check-reliability">Check reliability</h2>
+<section id="prepare-blood-scfas" class="level5">
+<h5 class="anchored" data-anchor-id="prepare-blood-scfas">Prepare blood SCFAs</h5>
+<div class="cell">
+<details>
+<summary>Code</summary>
+<div class="sourceCode cell-code" id="cb5"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="co"># 1) read data</span></span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a>dat_bloodSCFA <span class="ot">&lt;-</span> readxl<span class="sc">::</span><span class="fu">read_excel</span>(path_bloodMetabolomeXlsx, <span class="at">na =</span> <span class="st">&quot;&lt; 0&quot;</span>) <span class="sc">%&gt;%</span> </span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a>    <span class="fu">select</span>(<span class="st">&quot;Client Sample ID&quot;</span>, Analyte, <span class="st">&quot;Results (ng/mL)&quot;</span>) <span class="sc">%&gt;%</span> </span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a>    dplyr<span class="sc">::</span><span class="fu">rename</span>(<span class="at">sample_id =</span> <span class="st">&quot;Client Sample ID&quot;</span>,</span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a>                  <span class="at">results   =</span> <span class="st">&quot;Results (ng/mL)&quot;</span>) <span class="sc">%&gt;%</span> </span>
+<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a>    <span class="fu">mutate</span>(<span class="at">results =</span> <span class="fu">case_when</span>(<span class="fu">is.na</span>(results) <span class="sc">~</span> <span class="fl">0.01</span>,</span>
+<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a>                               <span class="cn">TRUE</span>           <span class="sc">~</span> results),</span>
+<span id="cb5-8"><a href="#cb5-8" aria-hidden="true" tabindex="-1"></a>           <span class="at">Analyte =</span> <span class="fu">tolower</span>(Analyte),</span>
+<span id="cb5-9"><a href="#cb5-9" aria-hidden="true" tabindex="-1"></a>           <span class="at">Analyte =</span> <span class="fu">gsub</span>(<span class="st">&quot;2-&quot;</span>, <span class="st">&quot;&quot;</span>, Analyte),</span>
+<span id="cb5-10"><a href="#cb5-10" aria-hidden="true" tabindex="-1"></a>           <span class="at">Analyte =</span> <span class="fu">gsub</span>(<span class="st">&quot; &quot;</span>, <span class="st">&quot;&quot;</span>, Analyte),</span>
+<span id="cb5-11"><a href="#cb5-11" aria-hidden="true" tabindex="-1"></a>           <span class="at">Analyte =</span> <span class="fu">gsub</span>(<span class="st">&quot;acid&quot;</span>, <span class="st">&quot;Acid&quot;</span>, Analyte),</span>
+<span id="cb5-12"><a href="#cb5-12" aria-hidden="true" tabindex="-1"></a>           <span class="at">Analyte =</span> <span class="fu">paste0</span>(<span class="st">&quot;blood_&quot;</span>, Analyte)) <span class="sc">%&gt;%</span> </span>
+<span id="cb5-13"><a href="#cb5-13" aria-hidden="true" tabindex="-1"></a>    tidyr<span class="sc">::</span><span class="fu">pivot_wider</span>(<span class="at">values_from =</span> results, <span class="at">id_cols =</span> sample_id, <span class="at">names_from =</span> Analyte)</span>
+<span id="cb5-14"><a href="#cb5-14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-15"><a href="#cb5-15" aria-hidden="true" tabindex="-1"></a><span class="co"># 2) prepare the lookup file</span></span>
+<span id="cb5-16"><a href="#cb5-16" aria-hidden="true" tabindex="-1"></a>dat_lookupBlood <span class="ot">&lt;-</span> <span class="fu">read_excel</span>(path_sampleLookupXlsx,</span>
+<span id="cb5-17"><a href="#cb5-17" aria-hidden="true" tabindex="-1"></a>                              <span class="at">sheet =</span> <span class="st">&quot;Duplikat Serum-Metabolon&quot;</span>) <span class="sc">%&gt;%</span> </span>
+<span id="cb5-18"><a href="#cb5-18" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">rename</span>(<span class="at">sampleID_reference   =</span> <span class="st">&quot;Sample Number&quot;</span>,</span>
+<span id="cb5-19"><a href="#cb5-19" aria-hidden="true" tabindex="-1"></a>                <span class="at">sampleID_origAndDupl =</span> <span class="st">&quot;Duplikat Serum-Metabolon&quot;</span>) <span class="sc">%&gt;%</span> </span>
+<span id="cb5-20"><a href="#cb5-20" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(<span class="fu">starts_with</span>(<span class="st">&quot;sampleID&quot;</span>)) <span class="sc">%&gt;%</span> </span>
+<span id="cb5-21"><a href="#cb5-21" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(<span class="sc">!</span><span class="fu">is.na</span>(sampleID_origAndDupl)) <span class="sc">%&gt;%</span> </span>
+<span id="cb5-22"><a href="#cb5-22" aria-hidden="true" tabindex="-1"></a>  <span class="fu">group_by</span>(sampleID_reference) <span class="sc">%&gt;%</span> </span>
+<span id="cb5-23"><a href="#cb5-23" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">obs_type =</span> <span class="fu">c</span>(<span class="st">&quot;orig&quot;</span>, <span class="st">&quot;dupl&quot;</span>)) <span class="sc">%&gt;%</span> </span>
+<span id="cb5-24"><a href="#cb5-24" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ungroup</span>()</span>
+<span id="cb5-25"><a href="#cb5-25" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-26"><a href="#cb5-26" aria-hidden="true" tabindex="-1"></a><span class="co"># 3) split the original and duplicate data</span></span>
+<span id="cb5-27"><a href="#cb5-27" aria-hidden="true" tabindex="-1"></a>dat_bloodSCFA <span class="ot">&lt;-</span> dat_bloodSCFA <span class="sc">%&gt;%</span> </span>
+<span id="cb5-28"><a href="#cb5-28" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(sample_id <span class="sc">%in%</span> dat_lookupBlood<span class="sc">$</span>sampleID_origAndDupl) <span class="sc">%&gt;%</span> </span>
+<span id="cb5-29"><a href="#cb5-29" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">sample_id =</span> <span class="fu">as.character</span>(sample_id)) <span class="sc">%&gt;%</span> </span>
+<span id="cb5-30"><a href="#cb5-30" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">left_join</span>(dat_lookupBlood, <span class="at">by =</span> <span class="fu">c</span>(<span class="st">&quot;sample_id&quot;</span> <span class="ot">=</span> <span class="st">&quot;sampleID_origAndDupl&quot;</span>)) <span class="sc">%&gt;%</span> </span>
+<span id="cb5-31"><a href="#cb5-31" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(<span class="sc">-</span>sample_id) <span class="sc">%&gt;%</span> </span>
+<span id="cb5-32"><a href="#cb5-32" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(sampleID_reference, obs_type, <span class="fu">everything</span>())</span>
+<span id="cb5-33"><a href="#cb5-33" aria-hidden="true" tabindex="-1"></a>dat_bloodOrig <span class="ot">&lt;-</span> dat_bloodSCFA <span class="sc">%&gt;%</span> <span class="fu">filter</span>(obs_type <span class="sc">==</span> <span class="st">&quot;orig&quot;</span>)</span>
+<span id="cb5-34"><a href="#cb5-34" aria-hidden="true" tabindex="-1"></a>dat_bloodDupl <span class="ot">&lt;-</span> dat_bloodSCFA <span class="sc">%&gt;%</span> <span class="fu">filter</span>(obs_type <span class="sc">==</span> <span class="st">&quot;dupl&quot;</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</details>
+</div>
+</section>
+<section id="prepare-stool-scfas" class="level5">
+<h5 class="anchored" data-anchor-id="prepare-stool-scfas">Prepare stool SCFAs</h5>
+<div class="cell">
+<details>
+<summary>Code</summary>
+<div class="sourceCode cell-code" id="cb6"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="co"># 1) read data</span></span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a>dat_stoolSCFA <span class="ot">&lt;-</span> readxl<span class="sc">::</span><span class="fu">read_excel</span>(path_stoolMetabolomeXlsx) <span class="sc">%&gt;%</span> </span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(<span class="st">&quot;Client Sample ID&quot;</span>, Analyte, Results) <span class="sc">%&gt;%</span> </span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a>    dplyr<span class="sc">::</span><span class="fu">rename</span>(<span class="at">sample_id =</span> <span class="st">&quot;Client Sample ID&quot;</span>) <span class="sc">%&gt;%</span> </span>
+<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a>    <span class="fu">mutate</span>(<span class="at">sample_id =</span> <span class="fu">as.numeric</span>(sample_id),</span>
+<span id="cb6-6"><a href="#cb6-6" aria-hidden="true" tabindex="-1"></a>           <span class="at">Analyte   =</span> <span class="fu">tolower</span>(Analyte),</span>
+<span id="cb6-7"><a href="#cb6-7" aria-hidden="true" tabindex="-1"></a>           <span class="at">Analyte   =</span> <span class="fu">gsub</span>(<span class="st">&quot;2-&quot;</span>, <span class="st">&quot;&quot;</span>, Analyte),</span>
+<span id="cb6-8"><a href="#cb6-8" aria-hidden="true" tabindex="-1"></a>           <span class="at">Analyte   =</span> <span class="fu">gsub</span>(<span class="st">&quot; &quot;</span>, <span class="st">&quot;&quot;</span>, Analyte),</span>
+<span id="cb6-9"><a href="#cb6-9" aria-hidden="true" tabindex="-1"></a>           <span class="at">Analyte   =</span> <span class="fu">gsub</span>(<span class="st">&quot;acid&quot;</span>, <span class="st">&quot;Acid&quot;</span>, Analyte),</span>
+<span id="cb6-10"><a href="#cb6-10" aria-hidden="true" tabindex="-1"></a>           <span class="at">Analyte   =</span> <span class="fu">paste0</span>(<span class="st">&quot;stool_&quot;</span>, Analyte)) <span class="sc">%&gt;%</span> </span>
+<span id="cb6-11"><a href="#cb6-11" aria-hidden="true" tabindex="-1"></a>    tidyr<span class="sc">::</span><span class="fu">pivot_wider</span>(<span class="at">values_from =</span> Results, <span class="at">id_cols =</span> sample_id, <span class="at">names_from =</span> Analyte)</span>
+<span id="cb6-12"><a href="#cb6-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-13"><a href="#cb6-13" aria-hidden="true" tabindex="-1"></a><span class="co"># 2) prepare the lookup file</span></span>
+<span id="cb6-14"><a href="#cb6-14" aria-hidden="true" tabindex="-1"></a>dat_lookupStool <span class="ot">&lt;-</span> <span class="fu">read_excel</span>(path_sampleLookupXlsx,</span>
+<span id="cb6-15"><a href="#cb6-15" aria-hidden="true" tabindex="-1"></a>                              <span class="at">sheet =</span> <span class="st">&quot;Duplikat Stuhl-Metabolon&quot;</span>) <span class="sc">%&gt;%</span> </span>
+<span id="cb6-16"><a href="#cb6-16" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">rename</span>(<span class="at">sampleID_orig =</span> <span class="st">&quot;Sample Number&quot;</span>,</span>
+<span id="cb6-17"><a href="#cb6-17" aria-hidden="true" tabindex="-1"></a>                <span class="at">sampleID_dupl =</span> <span class="st">&quot;Duplikat Stuhl-Metabolon&quot;</span>) <span class="sc">%&gt;%</span> </span>
+<span id="cb6-18"><a href="#cb6-18" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(<span class="fu">starts_with</span>(<span class="st">&quot;sampleID&quot;</span>))</span>
+<span id="cb6-19"><a href="#cb6-19" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-20"><a href="#cb6-20" aria-hidden="true" tabindex="-1"></a><span class="co"># 3) split the original and duplicate data</span></span>
+<span id="cb6-21"><a href="#cb6-21" aria-hidden="true" tabindex="-1"></a>dat_stoolOrig <span class="ot">&lt;-</span> dat_stoolSCFA <span class="sc">%&gt;%</span> </span>
+<span id="cb6-22"><a href="#cb6-22" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(sample_id <span class="sc">%in%</span> dat_lookupStool<span class="sc">$</span>sampleID_orig) <span class="sc">%&gt;%</span> </span>
+<span id="cb6-23"><a href="#cb6-23" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">rename</span>(<span class="at">sampleID_orig =</span> sample_id)</span>
+<span id="cb6-24"><a href="#cb6-24" aria-hidden="true" tabindex="-1"></a>dat_stoolDupl <span class="ot">&lt;-</span> dat_stoolSCFA <span class="sc">%&gt;%</span> </span>
+<span id="cb6-25"><a href="#cb6-25" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(sample_id <span class="sc">%in%</span> dat_lookupStool<span class="sc">$</span>sampleID_dupl) <span class="sc">%&gt;%</span> </span>
+<span id="cb6-26"><a href="#cb6-26" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">sample_id =</span> <span class="fu">as.character</span>(sample_id)) <span class="sc">%&gt;%</span> </span>
+<span id="cb6-27"><a href="#cb6-27" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">left_join</span>(dat_lookupStool, <span class="at">by =</span> <span class="fu">c</span>(<span class="st">&quot;sample_id&quot;</span> <span class="ot">=</span> <span class="st">&quot;sampleID_dupl&quot;</span>)) <span class="sc">%&gt;%</span> </span>
+<span id="cb6-28"><a href="#cb6-28" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(<span class="sc">-</span>sample_id) <span class="sc">%&gt;%</span> </span>
+<span id="cb6-29"><a href="#cb6-29" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(sampleID_orig, <span class="fu">everything</span>())</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</details>
+</div>
+</section>
+</section>
+<section id="check-reliability-of-species-abundances" class="level2">
+<h2 class="anchored" data-anchor-id="check-reliability-of-species-abundances">Check reliability of species’ abundances</h2>
 <p>Intra-observer reliability</p>
 <div class="cell">
 <details>
 <summary>Code</summary>
-<div class="sourceCode cell-code" id="cb5"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="co"># rename the samples to make duplicates clearer</span></span>
-<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a>dat_duplSamples <span class="ot">&lt;-</span> dat_lookupTax <span class="sc">%&gt;%</span> </span>
-<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(<span class="sc">!</span><span class="fu">is.na</span>(id_duplicateSample)) <span class="sc">%&gt;%</span> </span>
-<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(sample_id, id_duplicateSample)</span>
-<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> (i <span class="cf">in</span> <span class="dv">1</span><span class="sc">:</span><span class="fu">nrow</span>(dat_duplSamples)) {</span>
-<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a>  orig_column <span class="ot">&lt;-</span> <span class="fu">match</span>(<span class="fu">paste0</span>(<span class="st">&quot;sample_&quot;</span>, dat_duplSamples<span class="sc">$</span>sample_id[i]), <span class="fu">colnames</span>(dat_stoolOrigTax))</span>
-<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a>  dupl_column <span class="ot">&lt;-</span> <span class="fu">match</span>(<span class="fu">paste0</span>(<span class="st">&quot;sample_&quot;</span>, dat_duplSamples<span class="sc">$</span>id_duplicateSample[i]), <span class="fu">colnames</span>(dat_stoolDuplTax))</span>
-<span id="cb5-8"><a href="#cb5-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">colnames</span>(dat_stoolOrigTax)[orig_column] <span class="ot">&lt;-</span> <span class="fu">paste0</span>(<span class="st">&quot;sample&quot;</span>, i, <span class="st">&quot;_orig&quot;</span>)</span>
-<span id="cb5-9"><a href="#cb5-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">colnames</span>(dat_stoolDuplTax)[dupl_column] <span class="ot">&lt;-</span> <span class="fu">paste0</span>(<span class="st">&quot;sample&quot;</span>, i, <span class="st">&quot;_dupl&quot;</span>)</span>
-<span id="cb5-10"><a href="#cb5-10" aria-hidden="true" tabindex="-1"></a>}</span>
-<span id="cb5-11"><a href="#cb5-11" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-12"><a href="#cb5-12" aria-hidden="true" tabindex="-1"></a><span class="co"># create a joint dataset</span></span>
-<span id="cb5-13"><a href="#cb5-13" aria-hidden="true" tabindex="-1"></a>dat_x <span class="ot">&lt;-</span> dat_stoolOrigTax <span class="sc">%&gt;%</span> </span>
-<span id="cb5-14"><a href="#cb5-14" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(species, <span class="fu">starts_with</span>(<span class="st">&quot;sample&quot;</span>)) <span class="sc">%&gt;%</span> </span>
-<span id="cb5-15"><a href="#cb5-15" aria-hidden="true" tabindex="-1"></a>  tidyr<span class="sc">::</span><span class="fu">pivot_longer</span>(<span class="sc">-</span>species, <span class="at">names_to =</span> <span class="st">&quot;sample&quot;</span>, <span class="at">values_to =</span> <span class="st">&quot;value_orig&quot;</span>) <span class="sc">%&gt;%</span> </span>
-<span id="cb5-16"><a href="#cb5-16" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">sample =</span> <span class="fu">gsub</span>(sample, <span class="at">pattern =</span> <span class="st">&quot;_orig&quot;</span>, <span class="at">replacement =</span> <span class="st">&quot;&quot;</span>))</span>
-<span id="cb5-17"><a href="#cb5-17" aria-hidden="true" tabindex="-1"></a>dat_y <span class="ot">&lt;-</span> dat_stoolDuplTax <span class="sc">%&gt;%</span> </span>
-<span id="cb5-18"><a href="#cb5-18" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(species, <span class="fu">starts_with</span>(<span class="st">&quot;sample&quot;</span>)) <span class="sc">%&gt;%</span> </span>
-<span id="cb5-19"><a href="#cb5-19" aria-hidden="true" tabindex="-1"></a>  tidyr<span class="sc">::</span><span class="fu">pivot_longer</span>(<span class="sc">-</span>species, <span class="at">names_to =</span> <span class="st">&quot;sample&quot;</span>, <span class="at">values_to =</span> <span class="st">&quot;value_dupl&quot;</span>) <span class="sc">%&gt;%</span> </span>
-<span id="cb5-20"><a href="#cb5-20" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">sample =</span> <span class="fu">gsub</span>(sample, <span class="at">pattern =</span> <span class="st">&quot;_dupl&quot;</span>, <span class="at">replacement =</span> <span class="st">&quot;&quot;</span>))</span>
-<span id="cb5-21"><a href="#cb5-21" aria-hidden="true" tabindex="-1"></a>dat_wide <span class="ot">&lt;-</span> dat_x <span class="sc">%&gt;%</span> </span>
-<span id="cb5-22"><a href="#cb5-22" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">full_join</span>(dat_y, <span class="at">by =</span> <span class="fu">c</span>(<span class="st">&quot;species&quot;</span>, <span class="st">&quot;sample&quot;</span>)) <span class="sc">%&gt;%</span> </span>
-<span id="cb5-23"><a href="#cb5-23" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">value_orig =</span> <span class="fu">case_when</span>(<span class="fu">is.na</span>(value_orig) <span class="sc">~</span> <span class="dv">0</span>,</span>
-<span id="cb5-24"><a href="#cb5-24" aria-hidden="true" tabindex="-1"></a>                                <span class="cn">TRUE</span>              <span class="sc">~</span> value_orig),</span>
-<span id="cb5-25"><a href="#cb5-25" aria-hidden="true" tabindex="-1"></a>         <span class="at">value_dupl =</span> <span class="fu">case_when</span>(<span class="fu">is.na</span>(value_dupl) <span class="sc">~</span> <span class="dv">0</span>,</span>
-<span id="cb5-26"><a href="#cb5-26" aria-hidden="true" tabindex="-1"></a>                                <span class="cn">TRUE</span>              <span class="sc">~</span> value_dupl))</span>
-<span id="cb5-27"><a href="#cb5-27" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-28"><a href="#cb5-28" aria-hidden="true" tabindex="-1"></a><span class="co"># reshape to proper long format</span></span>
-<span id="cb5-29"><a href="#cb5-29" aria-hidden="true" tabindex="-1"></a>dat_long <span class="ot">&lt;-</span> dat_wide <span class="sc">%&gt;%</span> </span>
-<span id="cb5-30"><a href="#cb5-30" aria-hidden="true" tabindex="-1"></a>  tidyr<span class="sc">::</span><span class="fu">pivot_longer</span>(<span class="sc">-</span><span class="fu">c</span>(<span class="st">&quot;species&quot;</span>, <span class="st">&quot;sample&quot;</span>), <span class="at">names_to =</span> <span class="st">&quot;value_type&quot;</span>) <span class="sc">%&gt;%</span> </span>
-<span id="cb5-31"><a href="#cb5-31" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">value_type =</span> <span class="fu">gsub</span>(value_type, <span class="at">pattern =</span> <span class="st">&quot;value_&quot;</span>, <span class="at">replacement =</span> <span class="st">&quot;&quot;</span>))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb7"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="co"># rename the samples to make duplicates clearer</span></span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a>dat_duplSamples <span class="ot">&lt;-</span> dat_lookupTax <span class="sc">%&gt;%</span> </span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(<span class="sc">!</span><span class="fu">is.na</span>(id_duplicateSample)) <span class="sc">%&gt;%</span> </span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(sample_id, id_duplicateSample)</span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> (i <span class="cf">in</span> <span class="dv">1</span><span class="sc">:</span><span class="fu">nrow</span>(dat_duplSamples)) {</span>
+<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a>  orig_column <span class="ot">&lt;-</span> <span class="fu">match</span>(<span class="fu">paste0</span>(<span class="st">&quot;sample_&quot;</span>, dat_duplSamples<span class="sc">$</span>sample_id[i]), <span class="fu">colnames</span>(dat_stoolOrigTax))</span>
+<span id="cb7-7"><a href="#cb7-7" aria-hidden="true" tabindex="-1"></a>  dupl_column <span class="ot">&lt;-</span> <span class="fu">match</span>(<span class="fu">paste0</span>(<span class="st">&quot;sample_&quot;</span>, dat_duplSamples<span class="sc">$</span>id_duplicateSample[i]), <span class="fu">colnames</span>(dat_stoolDuplTax))</span>
+<span id="cb7-8"><a href="#cb7-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">colnames</span>(dat_stoolOrigTax)[orig_column] <span class="ot">&lt;-</span> <span class="fu">paste0</span>(<span class="st">&quot;sample&quot;</span>, i, <span class="st">&quot;_orig&quot;</span>)</span>
+<span id="cb7-9"><a href="#cb7-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">colnames</span>(dat_stoolDuplTax)[dupl_column] <span class="ot">&lt;-</span> <span class="fu">paste0</span>(<span class="st">&quot;sample&quot;</span>, i, <span class="st">&quot;_dupl&quot;</span>)</span>
+<span id="cb7-10"><a href="#cb7-10" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb7-11"><a href="#cb7-11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-12"><a href="#cb7-12" aria-hidden="true" tabindex="-1"></a><span class="co"># create a joint dataset</span></span>
+<span id="cb7-13"><a href="#cb7-13" aria-hidden="true" tabindex="-1"></a>dat_x <span class="ot">&lt;-</span> dat_stoolOrigTax <span class="sc">%&gt;%</span> </span>
+<span id="cb7-14"><a href="#cb7-14" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(species, <span class="fu">starts_with</span>(<span class="st">&quot;sample&quot;</span>)) <span class="sc">%&gt;%</span> </span>
+<span id="cb7-15"><a href="#cb7-15" aria-hidden="true" tabindex="-1"></a>  tidyr<span class="sc">::</span><span class="fu">pivot_longer</span>(<span class="sc">-</span>species, <span class="at">names_to =</span> <span class="st">&quot;sample&quot;</span>, <span class="at">values_to =</span> <span class="st">&quot;value_orig&quot;</span>) <span class="sc">%&gt;%</span> </span>
+<span id="cb7-16"><a href="#cb7-16" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">sample =</span> <span class="fu">gsub</span>(sample, <span class="at">pattern =</span> <span class="st">&quot;_orig&quot;</span>, <span class="at">replacement =</span> <span class="st">&quot;&quot;</span>))</span>
+<span id="cb7-17"><a href="#cb7-17" aria-hidden="true" tabindex="-1"></a>dat_y <span class="ot">&lt;-</span> dat_stoolDuplTax <span class="sc">%&gt;%</span> </span>
+<span id="cb7-18"><a href="#cb7-18" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(species, <span class="fu">starts_with</span>(<span class="st">&quot;sample&quot;</span>)) <span class="sc">%&gt;%</span> </span>
+<span id="cb7-19"><a href="#cb7-19" aria-hidden="true" tabindex="-1"></a>  tidyr<span class="sc">::</span><span class="fu">pivot_longer</span>(<span class="sc">-</span>species, <span class="at">names_to =</span> <span class="st">&quot;sample&quot;</span>, <span class="at">values_to =</span> <span class="st">&quot;value_dupl&quot;</span>) <span class="sc">%&gt;%</span> </span>
+<span id="cb7-20"><a href="#cb7-20" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">sample =</span> <span class="fu">gsub</span>(sample, <span class="at">pattern =</span> <span class="st">&quot;_dupl&quot;</span>, <span class="at">replacement =</span> <span class="st">&quot;&quot;</span>))</span>
+<span id="cb7-21"><a href="#cb7-21" aria-hidden="true" tabindex="-1"></a>dat_wide <span class="ot">&lt;-</span> dat_x <span class="sc">%&gt;%</span> </span>
+<span id="cb7-22"><a href="#cb7-22" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">full_join</span>(dat_y, <span class="at">by =</span> <span class="fu">c</span>(<span class="st">&quot;species&quot;</span>, <span class="st">&quot;sample&quot;</span>)) <span class="sc">%&gt;%</span> </span>
+<span id="cb7-23"><a href="#cb7-23" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">value_orig =</span> <span class="fu">case_when</span>(<span class="fu">is.na</span>(value_orig) <span class="sc">~</span> <span class="dv">0</span>,</span>
+<span id="cb7-24"><a href="#cb7-24" aria-hidden="true" tabindex="-1"></a>                                <span class="cn">TRUE</span>              <span class="sc">~</span> value_orig),</span>
+<span id="cb7-25"><a href="#cb7-25" aria-hidden="true" tabindex="-1"></a>         <span class="at">value_dupl =</span> <span class="fu">case_when</span>(<span class="fu">is.na</span>(value_dupl) <span class="sc">~</span> <span class="dv">0</span>,</span>
+<span id="cb7-26"><a href="#cb7-26" aria-hidden="true" tabindex="-1"></a>                                <span class="cn">TRUE</span>              <span class="sc">~</span> value_dupl))</span>
+<span id="cb7-27"><a href="#cb7-27" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-28"><a href="#cb7-28" aria-hidden="true" tabindex="-1"></a><span class="co"># reshape to proper long format</span></span>
+<span id="cb7-29"><a href="#cb7-29" aria-hidden="true" tabindex="-1"></a>dat_long <span class="ot">&lt;-</span> dat_wide <span class="sc">%&gt;%</span> </span>
+<span id="cb7-30"><a href="#cb7-30" aria-hidden="true" tabindex="-1"></a>  tidyr<span class="sc">::</span><span class="fu">pivot_longer</span>(<span class="sc">-</span><span class="fu">c</span>(<span class="st">&quot;species&quot;</span>, <span class="st">&quot;sample&quot;</span>), <span class="at">names_to =</span> <span class="st">&quot;value_type&quot;</span>) <span class="sc">%&gt;%</span> </span>
+<span id="cb7-31"><a href="#cb7-31" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">value_type =</span> <span class="fu">gsub</span>(value_type, <span class="at">pattern =</span> <span class="st">&quot;value_&quot;</span>, <span class="at">replacement =</span> <span class="st">&quot;&quot;</span>))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </details>
 </div>
 <p><strong>Correlations per sample</strong></p>
 <div class="cell">
 <details>
 <summary>Code</summary>
-<div class="sourceCode cell-code" id="cb6"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="co"># calculate correlations</span></span>
-<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a>dat_wide <span class="sc">%&gt;%</span> </span>
-<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">group_by</span>(sample) <span class="sc">%&gt;%</span> </span>
-<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">summarize</span>(<span class="at">corr =</span> <span class="fu">cor</span>(value_orig, value_dupl)) <span class="sc">%&gt;%</span> </span>
-<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ungroup</span>() <span class="sc">%&gt;%</span> </span>
-<span id="cb6-6"><a href="#cb6-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">summarize</span>(<span class="at">minCorr_perSample    =</span> <span class="fu">min</span>(corr),</span>
-<span id="cb6-7"><a href="#cb6-7" aria-hidden="true" tabindex="-1"></a>            <span class="at">meanCorr_perSample   =</span> <span class="fu">mean</span>(corr),</span>
-<span id="cb6-8"><a href="#cb6-8" aria-hidden="true" tabindex="-1"></a>            <span class="at">medianCorr_perSample =</span> <span class="fu">median</span>(corr),</span>
-<span id="cb6-9"><a href="#cb6-9" aria-hidden="true" tabindex="-1"></a>            <span class="at">maxCorr_perSample    =</span> <span class="fu">max</span>(corr)) <span class="sc">%&gt;%</span> </span>
-<span id="cb6-10"><a href="#cb6-10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">kable</span>(<span class="at">digits =</span> <span class="dv">2</span>) <span class="sc">%&gt;%</span> </span>
-<span id="cb6-11"><a href="#cb6-11" aria-hidden="true" tabindex="-1"></a>  <span class="fu">kable_styling</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb8"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="co"># calculate correlations</span></span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a>dat_wide <span class="sc">%&gt;%</span> </span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">group_by</span>(sample) <span class="sc">%&gt;%</span> </span>
+<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">summarize</span>(<span class="at">corr =</span> <span class="fu">cor</span>(value_orig, value_dupl)) <span class="sc">%&gt;%</span> </span>
+<span id="cb8-5"><a href="#cb8-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ungroup</span>() <span class="sc">%&gt;%</span> </span>
+<span id="cb8-6"><a href="#cb8-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">summarize</span>(<span class="at">minCorr_perSample    =</span> <span class="fu">min</span>(corr),</span>
+<span id="cb8-7"><a href="#cb8-7" aria-hidden="true" tabindex="-1"></a>            <span class="at">meanCorr_perSample   =</span> <span class="fu">mean</span>(corr),</span>
+<span id="cb8-8"><a href="#cb8-8" aria-hidden="true" tabindex="-1"></a>            <span class="at">medianCorr_perSample =</span> <span class="fu">median</span>(corr),</span>
+<span id="cb8-9"><a href="#cb8-9" aria-hidden="true" tabindex="-1"></a>            <span class="at">maxCorr_perSample    =</span> <span class="fu">max</span>(corr)) <span class="sc">%&gt;%</span> </span>
+<span id="cb8-10"><a href="#cb8-10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">kable</span>(<span class="at">digits =</span> <span class="dv">2</span>) <span class="sc">%&gt;%</span> </span>
+<span id="cb8-11"><a href="#cb8-11" aria-hidden="true" tabindex="-1"></a>  <span class="fu">kable_styling</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </details>
 <div class="cell-output-display">
 <table class="table table-sm table-striped small" data-quarto-postprocess="true">
@@ -3421,17 +3508,17 @@ border: 0;
 <div class="cell">
 <details>
 <summary>Code</summary>
-<div class="sourceCode cell-code" id="cb7"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="co"># calculate correlations</span></span>
-<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a>dat_wide <span class="sc">%&gt;%</span> </span>
-<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">group_by</span>(species) <span class="sc">%&gt;%</span> </span>
-<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">summarize</span>(<span class="at">corr =</span> <span class="fu">cor</span>(value_orig, value_dupl)) <span class="sc">%&gt;%</span> </span>
-<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ungroup</span>() <span class="sc">%&gt;%</span> </span>
-<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">summarize</span>(<span class="at">minCorr_perSpecies    =</span> <span class="fu">min</span>(corr,    <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
-<span id="cb7-7"><a href="#cb7-7" aria-hidden="true" tabindex="-1"></a>            <span class="at">meanCorr_perSpecies   =</span> <span class="fu">mean</span>(corr,   <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
-<span id="cb7-8"><a href="#cb7-8" aria-hidden="true" tabindex="-1"></a>            <span class="at">medianCorr_perSpecies =</span> <span class="fu">median</span>(corr, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
-<span id="cb7-9"><a href="#cb7-9" aria-hidden="true" tabindex="-1"></a>            <span class="at">maxCorr_perSpecies    =</span> <span class="fu">max</span>(corr,    <span class="at">na.rm =</span> <span class="cn">TRUE</span>)) <span class="sc">%&gt;%</span> </span>
-<span id="cb7-10"><a href="#cb7-10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">kable</span>(<span class="at">digits =</span> <span class="dv">2</span>) <span class="sc">%&gt;%</span> </span>
-<span id="cb7-11"><a href="#cb7-11" aria-hidden="true" tabindex="-1"></a>  <span class="fu">kable_styling</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb9"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="co"># calculate correlations</span></span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a>dat_wide <span class="sc">%&gt;%</span> </span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">group_by</span>(species) <span class="sc">%&gt;%</span> </span>
+<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">summarize</span>(<span class="at">corr =</span> <span class="fu">cor</span>(value_orig, value_dupl)) <span class="sc">%&gt;%</span> </span>
+<span id="cb9-5"><a href="#cb9-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ungroup</span>() <span class="sc">%&gt;%</span> </span>
+<span id="cb9-6"><a href="#cb9-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">summarize</span>(<span class="at">minCorr_perSpecies    =</span> <span class="fu">min</span>(corr,    <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
+<span id="cb9-7"><a href="#cb9-7" aria-hidden="true" tabindex="-1"></a>            <span class="at">meanCorr_perSpecies   =</span> <span class="fu">mean</span>(corr,   <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
+<span id="cb9-8"><a href="#cb9-8" aria-hidden="true" tabindex="-1"></a>            <span class="at">medianCorr_perSpecies =</span> <span class="fu">median</span>(corr, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
+<span id="cb9-9"><a href="#cb9-9" aria-hidden="true" tabindex="-1"></a>            <span class="at">maxCorr_perSpecies    =</span> <span class="fu">max</span>(corr,    <span class="at">na.rm =</span> <span class="cn">TRUE</span>)) <span class="sc">%&gt;%</span> </span>
+<span id="cb9-10"><a href="#cb9-10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">kable</span>(<span class="at">digits =</span> <span class="dv">2</span>) <span class="sc">%&gt;%</span> </span>
+<span id="cb9-11"><a href="#cb9-11" aria-hidden="true" tabindex="-1"></a>  <span class="fu">kable_styling</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </details>
 <div class="cell-output-display">
 <table class="table table-sm table-striped small" data-quarto-postprocess="true">
@@ -3460,10 +3547,10 @@ border: 0;
 <div class="cell">
 <details>
 <summary>Code</summary>
-<div class="sourceCode cell-code" id="cb8"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="co"># CoV for original measurements</span></span>
-<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a>cov_orig <span class="ot">&lt;-</span> <span class="fu">sd</span>(dat_wide<span class="sc">$</span>value_orig) <span class="sc">/</span> <span class="fu">mean</span>(dat_wide<span class="sc">$</span>value_orig)</span>
-<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a><span class="co"># CoV for duplicated measurements</span></span>
-<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a>cov_dupl <span class="ot">&lt;-</span> <span class="fu">sd</span>(dat_wide<span class="sc">$</span>value_dupl) <span class="sc">/</span> <span class="fu">mean</span>(dat_wide<span class="sc">$</span>value_dupl)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb10"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="co"># CoV for original measurements</span></span>
+<span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a>cov_orig <span class="ot">&lt;-</span> <span class="fu">sd</span>(dat_wide<span class="sc">$</span>value_orig) <span class="sc">/</span> <span class="fu">mean</span>(dat_wide<span class="sc">$</span>value_orig)</span>
+<span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a><span class="co"># CoV for duplicated measurements</span></span>
+<span id="cb10-4"><a href="#cb10-4" aria-hidden="true" tabindex="-1"></a>cov_dupl <span class="ot">&lt;-</span> <span class="fu">sd</span>(dat_wide<span class="sc">$</span>value_dupl) <span class="sc">/</span> <span class="fu">mean</span>(dat_wide<span class="sc">$</span>value_dupl)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </details>
 </div>
 <p>CoV original measurements (based on arithmetic mean 0.11): 7.26<br>
@@ -3481,36 +3568,36 @@ For each species we first estimate the following linear mixed regression model:<
 <div class="cell">
 <details>
 <summary>Code</summary>
-<div class="sourceCode cell-code" id="cb9"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="co"># estimate one ICC per species</span></span>
-<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a>species_vec <span class="ot">&lt;-</span> dat_long<span class="sc">$</span>species <span class="sc">%&gt;%</span> <span class="fu">unique</span>() <span class="sc">%&gt;%</span> <span class="fu">as.character</span>()</span>
-<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a>icc_vector  <span class="ot">&lt;-</span> <span class="fu">sapply</span>(species_vec, <span class="cf">function</span>(spec) {</span>
-<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a>  model <span class="ot">&lt;-</span> dat_long <span class="sc">%&gt;%</span> </span>
-<span id="cb9-5"><a href="#cb9-5" aria-hidden="true" tabindex="-1"></a>    <span class="fu">filter</span>(species <span class="sc">==</span> spec) <span class="sc">%&gt;%</span> </span>
-<span id="cb9-6"><a href="#cb9-6" aria-hidden="true" tabindex="-1"></a>    <span class="fu">mutate</span>(<span class="at">sample     =</span> <span class="fu">factor</span>(sample),</span>
-<span id="cb9-7"><a href="#cb9-7" aria-hidden="true" tabindex="-1"></a>           <span class="at">value_type =</span> <span class="fu">factor</span>(value_type)) <span class="sc">%&gt;%</span> </span>
-<span id="cb9-8"><a href="#cb9-8" aria-hidden="true" tabindex="-1"></a>    <span class="fu">gam</span>(value <span class="sc">~</span> sample <span class="sc">+</span> <span class="fu">s</span>(value_type, <span class="at">bs =</span> <span class="st">&quot;re&quot;</span>), <span class="at">data =</span> .)</span>
-<span id="cb9-9"><a href="#cb9-9" aria-hidden="true" tabindex="-1"></a>  </span>
-<span id="cb9-10"><a href="#cb9-10" aria-hidden="true" tabindex="-1"></a>  </span>
-<span id="cb9-11"><a href="#cb9-11" aria-hidden="true" tabindex="-1"></a>  <span class="co"># extract ICC from the model</span></span>
-<span id="cb9-12"><a href="#cb9-12" aria-hidden="true" tabindex="-1"></a>  sigma2 <span class="ot">&lt;-</span> model<span class="sc">$</span>sig2</span>
-<span id="cb9-13"><a href="#cb9-13" aria-hidden="true" tabindex="-1"></a>  delta  <span class="ot">&lt;-</span> mgcv<span class="sc">::</span><span class="fu">gam.vcomp</span>(model) <span class="sc">%&gt;%</span> <span class="fu">unname</span>()</span>
-<span id="cb9-14"><a href="#cb9-14" aria-hidden="true" tabindex="-1"></a>  delta2 <span class="ot">&lt;-</span> delta<span class="sc">^</span><span class="dv">2</span></span>
-<span id="cb9-15"><a href="#cb9-15" aria-hidden="true" tabindex="-1"></a>  icc    <span class="ot">&lt;-</span> delta2 <span class="sc">/</span> (delta2 <span class="sc">+</span> sigma2)</span>
-<span id="cb9-16"><a href="#cb9-16" aria-hidden="true" tabindex="-1"></a>  </span>
-<span id="cb9-17"><a href="#cb9-17" aria-hidden="true" tabindex="-1"></a>  <span class="fu">return</span>(icc)</span>
-<span id="cb9-18"><a href="#cb9-18" aria-hidden="true" tabindex="-1"></a>})</span>
-<span id="cb9-19"><a href="#cb9-19" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb9-20"><a href="#cb9-20" aria-hidden="true" tabindex="-1"></a><span class="co"># print a summary table</span></span>
-<span id="cb9-21"><a href="#cb9-21" aria-hidden="true" tabindex="-1"></a><span class="fu">data.frame</span>(<span class="at">min_ICC    =</span> <span class="fu">min</span>(icc_vector),</span>
-<span id="cb9-22"><a href="#cb9-22" aria-hidden="true" tabindex="-1"></a>           <span class="at">q2.5_ICC   =</span> <span class="fu">quantile</span>(icc_vector, <span class="at">probs =</span> <span class="fl">0.025</span>) <span class="sc">%&gt;%</span> <span class="fu">unname</span>(),</span>
-<span id="cb9-23"><a href="#cb9-23" aria-hidden="true" tabindex="-1"></a>           <span class="at">q5_ICC     =</span> <span class="fu">quantile</span>(icc_vector, <span class="at">probs =</span> <span class="fl">0.05</span>) <span class="sc">%&gt;%</span> <span class="fu">unname</span>(),</span>
-<span id="cb9-24"><a href="#cb9-24" aria-hidden="true" tabindex="-1"></a>           <span class="at">mean_ICC   =</span> <span class="fu">mean</span>(icc_vector),</span>
-<span id="cb9-25"><a href="#cb9-25" aria-hidden="true" tabindex="-1"></a>           <span class="at">median_ICC =</span> <span class="fu">median</span>(icc_vector),</span>
-<span id="cb9-26"><a href="#cb9-26" aria-hidden="true" tabindex="-1"></a>           <span class="at">q95_ICC    =</span> <span class="fu">quantile</span>(icc_vector, <span class="at">probs =</span> <span class="fl">0.95</span>) <span class="sc">%&gt;%</span> <span class="fu">unname</span>(),</span>
-<span id="cb9-27"><a href="#cb9-27" aria-hidden="true" tabindex="-1"></a>           <span class="at">q97.5_ICC  =</span> <span class="fu">quantile</span>(icc_vector, <span class="at">probs =</span> <span class="fl">0.975</span>) <span class="sc">%&gt;%</span> <span class="fu">unname</span>(),</span>
-<span id="cb9-28"><a href="#cb9-28" aria-hidden="true" tabindex="-1"></a>           <span class="at">max_ICC    =</span> <span class="fu">max</span>(icc_vector)) <span class="sc">%&gt;%</span> </span>
-<span id="cb9-29"><a href="#cb9-29" aria-hidden="true" tabindex="-1"></a>  <span class="fu">kable</span>(<span class="at">digits =</span> <span class="dv">2</span>) <span class="sc">%&gt;%</span> </span>
-<span id="cb9-30"><a href="#cb9-30" aria-hidden="true" tabindex="-1"></a>  <span class="fu">kable_styling</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb11"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="co"># estimate one ICC per species</span></span>
+<span id="cb11-2"><a href="#cb11-2" aria-hidden="true" tabindex="-1"></a>species_vec <span class="ot">&lt;-</span> dat_long<span class="sc">$</span>species <span class="sc">%&gt;%</span> <span class="fu">unique</span>() <span class="sc">%&gt;%</span> <span class="fu">as.character</span>()</span>
+<span id="cb11-3"><a href="#cb11-3" aria-hidden="true" tabindex="-1"></a>icc_vector  <span class="ot">&lt;-</span> <span class="fu">sapply</span>(species_vec, <span class="cf">function</span>(spec) {</span>
+<span id="cb11-4"><a href="#cb11-4" aria-hidden="true" tabindex="-1"></a>  model <span class="ot">&lt;-</span> dat_long <span class="sc">%&gt;%</span> </span>
+<span id="cb11-5"><a href="#cb11-5" aria-hidden="true" tabindex="-1"></a>    <span class="fu">filter</span>(species <span class="sc">==</span> spec) <span class="sc">%&gt;%</span> </span>
+<span id="cb11-6"><a href="#cb11-6" aria-hidden="true" tabindex="-1"></a>    <span class="fu">mutate</span>(<span class="at">sample     =</span> <span class="fu">factor</span>(sample),</span>
+<span id="cb11-7"><a href="#cb11-7" aria-hidden="true" tabindex="-1"></a>           <span class="at">value_type =</span> <span class="fu">factor</span>(value_type)) <span class="sc">%&gt;%</span> </span>
+<span id="cb11-8"><a href="#cb11-8" aria-hidden="true" tabindex="-1"></a>    <span class="fu">gam</span>(value <span class="sc">~</span> sample <span class="sc">+</span> <span class="fu">s</span>(value_type, <span class="at">bs =</span> <span class="st">&quot;re&quot;</span>), <span class="at">data =</span> .)</span>
+<span id="cb11-9"><a href="#cb11-9" aria-hidden="true" tabindex="-1"></a>  </span>
+<span id="cb11-10"><a href="#cb11-10" aria-hidden="true" tabindex="-1"></a>  </span>
+<span id="cb11-11"><a href="#cb11-11" aria-hidden="true" tabindex="-1"></a>  <span class="co"># extract ICC from the model</span></span>
+<span id="cb11-12"><a href="#cb11-12" aria-hidden="true" tabindex="-1"></a>  sigma2 <span class="ot">&lt;-</span> model<span class="sc">$</span>sig2</span>
+<span id="cb11-13"><a href="#cb11-13" aria-hidden="true" tabindex="-1"></a>  delta  <span class="ot">&lt;-</span> mgcv<span class="sc">::</span><span class="fu">gam.vcomp</span>(model) <span class="sc">%&gt;%</span> <span class="fu">unname</span>()</span>
+<span id="cb11-14"><a href="#cb11-14" aria-hidden="true" tabindex="-1"></a>  delta2 <span class="ot">&lt;-</span> delta<span class="sc">^</span><span class="dv">2</span></span>
+<span id="cb11-15"><a href="#cb11-15" aria-hidden="true" tabindex="-1"></a>  icc    <span class="ot">&lt;-</span> delta2 <span class="sc">/</span> (delta2 <span class="sc">+</span> sigma2)</span>
+<span id="cb11-16"><a href="#cb11-16" aria-hidden="true" tabindex="-1"></a>  </span>
+<span id="cb11-17"><a href="#cb11-17" aria-hidden="true" tabindex="-1"></a>  <span class="fu">return</span>(icc)</span>
+<span id="cb11-18"><a href="#cb11-18" aria-hidden="true" tabindex="-1"></a>})</span>
+<span id="cb11-19"><a href="#cb11-19" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb11-20"><a href="#cb11-20" aria-hidden="true" tabindex="-1"></a><span class="co"># print a summary table</span></span>
+<span id="cb11-21"><a href="#cb11-21" aria-hidden="true" tabindex="-1"></a><span class="fu">data.frame</span>(<span class="at">min_ICC    =</span> <span class="fu">min</span>(icc_vector),</span>
+<span id="cb11-22"><a href="#cb11-22" aria-hidden="true" tabindex="-1"></a>           <span class="at">q2.5_ICC   =</span> <span class="fu">quantile</span>(icc_vector, <span class="at">probs =</span> <span class="fl">0.025</span>) <span class="sc">%&gt;%</span> <span class="fu">unname</span>(),</span>
+<span id="cb11-23"><a href="#cb11-23" aria-hidden="true" tabindex="-1"></a>           <span class="at">q5_ICC     =</span> <span class="fu">quantile</span>(icc_vector, <span class="at">probs =</span> <span class="fl">0.05</span>) <span class="sc">%&gt;%</span> <span class="fu">unname</span>(),</span>
+<span id="cb11-24"><a href="#cb11-24" aria-hidden="true" tabindex="-1"></a>           <span class="at">mean_ICC   =</span> <span class="fu">mean</span>(icc_vector),</span>
+<span id="cb11-25"><a href="#cb11-25" aria-hidden="true" tabindex="-1"></a>           <span class="at">median_ICC =</span> <span class="fu">median</span>(icc_vector),</span>
+<span id="cb11-26"><a href="#cb11-26" aria-hidden="true" tabindex="-1"></a>           <span class="at">q95_ICC    =</span> <span class="fu">quantile</span>(icc_vector, <span class="at">probs =</span> <span class="fl">0.95</span>) <span class="sc">%&gt;%</span> <span class="fu">unname</span>(),</span>
+<span id="cb11-27"><a href="#cb11-27" aria-hidden="true" tabindex="-1"></a>           <span class="at">q97.5_ICC  =</span> <span class="fu">quantile</span>(icc_vector, <span class="at">probs =</span> <span class="fl">0.975</span>) <span class="sc">%&gt;%</span> <span class="fu">unname</span>(),</span>
+<span id="cb11-28"><a href="#cb11-28" aria-hidden="true" tabindex="-1"></a>           <span class="at">max_ICC    =</span> <span class="fu">max</span>(icc_vector)) <span class="sc">%&gt;%</span> </span>
+<span id="cb11-29"><a href="#cb11-29" aria-hidden="true" tabindex="-1"></a>  <span class="fu">kable</span>(<span class="at">digits =</span> <span class="dv">2</span>) <span class="sc">%&gt;%</span> </span>
+<span id="cb11-30"><a href="#cb11-30" aria-hidden="true" tabindex="-1"></a>  <span class="fu">kable_styling</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </details>
 <div class="cell-output-display">
 <table class="table table-sm table-striped small" data-quarto-postprocess="true">
@@ -3547,12 +3634,12 @@ For each species we first estimate the following linear mixed regression model:<
 <div class="cell">
 <details>
 <summary>Code</summary>
-<div class="sourceCode cell-code" id="cb10"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="fu">data.frame</span>(<span class="at">species =</span> <span class="fu">names</span>(icc_vector),</span>
-<span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a>           <span class="at">icc     =</span> <span class="fu">unname</span>(icc_vector)) <span class="sc">%&gt;%</span> </span>
-<span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(icc <span class="sc">&gt;</span> <span class="fl">0.2</span>) <span class="sc">%&gt;%</span> </span>
-<span id="cb10-4"><a href="#cb10-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">arrange</span>(<span class="fu">desc</span>(icc)) <span class="sc">%&gt;%</span> </span>
-<span id="cb10-5"><a href="#cb10-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">kable</span>(<span class="at">digits =</span> <span class="dv">2</span>) <span class="sc">%&gt;%</span> </span>
-<span id="cb10-6"><a href="#cb10-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">kable_styling</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb12"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="fu">data.frame</span>(<span class="at">species =</span> <span class="fu">names</span>(icc_vector),</span>
+<span id="cb12-2"><a href="#cb12-2" aria-hidden="true" tabindex="-1"></a>           <span class="at">icc     =</span> <span class="fu">unname</span>(icc_vector)) <span class="sc">%&gt;%</span> </span>
+<span id="cb12-3"><a href="#cb12-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(icc <span class="sc">&gt;</span> <span class="fl">0.2</span>) <span class="sc">%&gt;%</span> </span>
+<span id="cb12-4"><a href="#cb12-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">arrange</span>(<span class="fu">desc</span>(icc)) <span class="sc">%&gt;%</span> </span>
+<span id="cb12-5"><a href="#cb12-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">kable</span>(<span class="at">digits =</span> <span class="dv">2</span>) <span class="sc">%&gt;%</span> </span>
+<span id="cb12-6"><a href="#cb12-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">kable_styling</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </details>
 <div class="cell-output-display">
 <table class="table table-sm table-striped small" data-quarto-postprocess="true">
@@ -3585,6 +3672,376 @@ For each species we first estimate the following linear mixed regression model:<
 
 </div>
 </div>
+</section>
+<section id="check-reliability-of-blood-scfas" class="level2">
+<h2 class="anchored" data-anchor-id="check-reliability-of-blood-scfas">Check reliability of blood SCFAs</h2>
+<p>Intra-observer reliability</p>
+<p><strong>Correlations per sample</strong></p>
+<div class="cell">
+<details>
+<summary>Code</summary>
+<div class="sourceCode cell-code" id="cb13"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a><span class="co"># calculate correlations</span></span>
+<span id="cb13-2"><a href="#cb13-2" aria-hidden="true" tabindex="-1"></a>dat_corr <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(<span class="at">marker      =</span> <span class="fu">c</span>(<span class="st">&quot;methylbutyric acid&quot;</span>, <span class="st">&quot;acetic acid&quot;</span>, <span class="st">&quot;butyric acid&quot;</span>, <span class="st">&quot;hexanoic acid&quot;</span>,</span>
+<span id="cb13-3"><a href="#cb13-3" aria-hidden="true" tabindex="-1"></a>                                       <span class="st">&quot;isobutyric acid&quot;</span>, <span class="st">&quot;isovaleric acid&quot;</span>, <span class="st">&quot;propionic acid&quot;</span>, <span class="st">&quot;valeric acid&quot;</span>),</span>
+<span id="cb13-4"><a href="#cb13-4" aria-hidden="true" tabindex="-1"></a>                       <span class="at">correlation =</span> <span class="fu">c</span>(<span class="fu">cor</span>(<span class="at">x =</span> dat_bloodOrig<span class="sc">$</span>blood_methylbutyricAcid,</span>
+<span id="cb13-5"><a href="#cb13-5" aria-hidden="true" tabindex="-1"></a>                                           <span class="at">y =</span> dat_bloodDupl<span class="sc">$</span>blood_methylbutyricAcid),</span>
+<span id="cb13-6"><a href="#cb13-6" aria-hidden="true" tabindex="-1"></a>                                       <span class="fu">cor</span>(<span class="at">x =</span> dat_bloodOrig<span class="sc">$</span>blood_aceticAcid,</span>
+<span id="cb13-7"><a href="#cb13-7" aria-hidden="true" tabindex="-1"></a>                                           <span class="at">y =</span> dat_bloodDupl<span class="sc">$</span>blood_aceticAcid),</span>
+<span id="cb13-8"><a href="#cb13-8" aria-hidden="true" tabindex="-1"></a>                                       <span class="fu">cor</span>(<span class="at">x =</span> dat_bloodOrig<span class="sc">$</span>blood_butyricAcid,</span>
+<span id="cb13-9"><a href="#cb13-9" aria-hidden="true" tabindex="-1"></a>                                           <span class="at">y =</span> dat_bloodDupl<span class="sc">$</span>blood_butyricAcid),</span>
+<span id="cb13-10"><a href="#cb13-10" aria-hidden="true" tabindex="-1"></a>                                       <span class="fu">cor</span>(<span class="at">x =</span> dat_bloodOrig<span class="sc">$</span>blood_hexanoicAcid,</span>
+<span id="cb13-11"><a href="#cb13-11" aria-hidden="true" tabindex="-1"></a>                                           <span class="at">y =</span> dat_bloodDupl<span class="sc">$</span>blood_hexanoicAcid),</span>
+<span id="cb13-12"><a href="#cb13-12" aria-hidden="true" tabindex="-1"></a>                                       <span class="fu">cor</span>(<span class="at">x =</span> dat_bloodOrig<span class="sc">$</span>blood_isobutyricAcid,</span>
+<span id="cb13-13"><a href="#cb13-13" aria-hidden="true" tabindex="-1"></a>                                           <span class="at">y =</span> dat_bloodDupl<span class="sc">$</span>blood_isobutyricAcid),</span>
+<span id="cb13-14"><a href="#cb13-14" aria-hidden="true" tabindex="-1"></a>                                       <span class="fu">cor</span>(<span class="at">x =</span> dat_bloodOrig<span class="sc">$</span>blood_isovalericAcid,</span>
+<span id="cb13-15"><a href="#cb13-15" aria-hidden="true" tabindex="-1"></a>                                           <span class="at">y =</span> dat_bloodDupl<span class="sc">$</span>blood_isovalericAcid),</span>
+<span id="cb13-16"><a href="#cb13-16" aria-hidden="true" tabindex="-1"></a>                                       <span class="fu">cor</span>(<span class="at">x =</span> dat_bloodOrig<span class="sc">$</span>blood_propionicAcid,</span>
+<span id="cb13-17"><a href="#cb13-17" aria-hidden="true" tabindex="-1"></a>                                           <span class="at">y =</span> dat_bloodDupl<span class="sc">$</span>blood_propionicAcid),</span>
+<span id="cb13-18"><a href="#cb13-18" aria-hidden="true" tabindex="-1"></a>                                       <span class="fu">cor</span>(<span class="at">x =</span> dat_bloodOrig<span class="sc">$</span>blood_valericAcid,</span>
+<span id="cb13-19"><a href="#cb13-19" aria-hidden="true" tabindex="-1"></a>                                           <span class="at">y =</span> dat_bloodDupl<span class="sc">$</span>blood_valericAcid)))</span>
+<span id="cb13-20"><a href="#cb13-20" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb13-21"><a href="#cb13-21" aria-hidden="true" tabindex="-1"></a>dat_corr <span class="sc">%&gt;%</span> </span>
+<span id="cb13-22"><a href="#cb13-22" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">correlation =</span> <span class="fu">round</span>(correlation, <span class="dv">2</span>)) <span class="sc">%&gt;%</span> </span>
+<span id="cb13-23"><a href="#cb13-23" aria-hidden="true" tabindex="-1"></a>  <span class="fu">kable</span>() <span class="sc">%&gt;%</span> </span>
+<span id="cb13-24"><a href="#cb13-24" aria-hidden="true" tabindex="-1"></a>  <span class="fu">kable_styling</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</details>
+<div class="cell-output-display">
+<table class="table table-sm table-striped small" data-quarto-postprocess="true">
+<thead>
+<tr class="header">
+<th style="text-align: left;" data-quarto-table-cell-role="th">marker</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">correlation</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;">methylbutyric acid</td>
+<td style="text-align: right;">0.55</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">acetic acid</td>
+<td style="text-align: right;">0.97</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">butyric acid</td>
+<td style="text-align: right;">0.66</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">hexanoic acid</td>
+<td style="text-align: right;">0.70</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">isobutyric acid</td>
+<td style="text-align: right;">0.50</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">isovaleric acid</td>
+<td style="text-align: right;">0.88</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">propionic acid</td>
+<td style="text-align: right;">0.91</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">valeric acid</td>
+<td style="text-align: right;">0.42</td>
+</tr>
+</tbody>
+</table>
+
+
+</div>
+</div>
+<p>Average correlation: 0.7</p>
+<p><strong>Intra-Class Correlation</strong></p>
+<p>We estimate one ICC for every one of the 8 markers.<br>
+For each marker we first estimate the following linear mixed regression model:</p>
+<ul>
+<li>dependent variable: marker value</li>
+<li>independent variables: sample indicator (as fixed effect), binary indicator if ‘original’ or ‘duplicated’ sample (as random effect).</li>
+</ul>
+<p>Based on this model we then estimate the ICC based on the random effect variance <span class="math inline">\(\sigma^2_\delta\)</span> and the residual variance <span class="math inline">\(\sigma^2_\epsilon\)</span>: <span class="math display">\[
+\frac{\sigma^2_\delta}{\sigma^2_\delta + \sigma^2_\epsilon}
+\]</span></p>
+<div class="cell">
+<details>
+<summary>Code</summary>
+<div class="sourceCode cell-code" id="cb14"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="co"># create a joint dataset for the model estimation</span></span>
+<span id="cb14-2"><a href="#cb14-2" aria-hidden="true" tabindex="-1"></a>datJoint_blood <span class="ot">&lt;-</span> dat_bloodOrig <span class="sc">%&gt;%</span> </span>
+<span id="cb14-3"><a href="#cb14-3" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">bind_rows</span>(dat_bloodDupl) <span class="sc">%&gt;%</span> </span>
+<span id="cb14-4"><a href="#cb14-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">sampleID_reference =</span> <span class="fu">factor</span>(sampleID_reference),</span>
+<span id="cb14-5"><a href="#cb14-5" aria-hidden="true" tabindex="-1"></a>         <span class="at">obs_type           =</span> <span class="fu">factor</span>(obs_type))</span>
+<span id="cb14-6"><a href="#cb14-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-7"><a href="#cb14-7" aria-hidden="true" tabindex="-1"></a><span class="co"># model estimation</span></span>
+<span id="cb14-8"><a href="#cb14-8" aria-hidden="true" tabindex="-1"></a>model_mbA <span class="ot">&lt;-</span> <span class="fu">gam</span>(blood_methylbutyricAcid <span class="sc">~</span> sampleID_reference <span class="sc">+</span> <span class="fu">s</span>(obs_type, <span class="at">bs =</span> <span class="st">&quot;re&quot;</span>), <span class="at">data =</span> datJoint_blood)</span>
+<span id="cb14-9"><a href="#cb14-9" aria-hidden="true" tabindex="-1"></a>model_acA <span class="ot">&lt;-</span> <span class="fu">gam</span>(blood_aceticAcid        <span class="sc">~</span> sampleID_reference <span class="sc">+</span> <span class="fu">s</span>(obs_type, <span class="at">bs =</span> <span class="st">&quot;re&quot;</span>), <span class="at">data =</span> datJoint_blood)</span>
+<span id="cb14-10"><a href="#cb14-10" aria-hidden="true" tabindex="-1"></a>model_btA <span class="ot">&lt;-</span> <span class="fu">gam</span>(blood_butyricAcid       <span class="sc">~</span> sampleID_reference <span class="sc">+</span> <span class="fu">s</span>(obs_type, <span class="at">bs =</span> <span class="st">&quot;re&quot;</span>), <span class="at">data =</span> datJoint_blood)</span>
+<span id="cb14-11"><a href="#cb14-11" aria-hidden="true" tabindex="-1"></a>model_hxA <span class="ot">&lt;-</span> <span class="fu">gam</span>(blood_hexanoicAcid      <span class="sc">~</span> sampleID_reference <span class="sc">+</span> <span class="fu">s</span>(obs_type, <span class="at">bs =</span> <span class="st">&quot;re&quot;</span>), <span class="at">data =</span> datJoint_blood)</span>
+<span id="cb14-12"><a href="#cb14-12" aria-hidden="true" tabindex="-1"></a>model_ibA <span class="ot">&lt;-</span> <span class="fu">gam</span>(blood_isobutyricAcid    <span class="sc">~</span> sampleID_reference <span class="sc">+</span> <span class="fu">s</span>(obs_type, <span class="at">bs =</span> <span class="st">&quot;re&quot;</span>), <span class="at">data =</span> datJoint_blood)</span>
+<span id="cb14-13"><a href="#cb14-13" aria-hidden="true" tabindex="-1"></a>model_ivA <span class="ot">&lt;-</span> <span class="fu">gam</span>(blood_isovalericAcid    <span class="sc">~</span> sampleID_reference <span class="sc">+</span> <span class="fu">s</span>(obs_type, <span class="at">bs =</span> <span class="st">&quot;re&quot;</span>), <span class="at">data =</span> datJoint_blood)</span>
+<span id="cb14-14"><a href="#cb14-14" aria-hidden="true" tabindex="-1"></a>model_ppA <span class="ot">&lt;-</span> <span class="fu">gam</span>(blood_propionicAcid     <span class="sc">~</span> sampleID_reference <span class="sc">+</span> <span class="fu">s</span>(obs_type, <span class="at">bs =</span> <span class="st">&quot;re&quot;</span>), <span class="at">data =</span> datJoint_blood)</span>
+<span id="cb14-15"><a href="#cb14-15" aria-hidden="true" tabindex="-1"></a>model_vlA <span class="ot">&lt;-</span> <span class="fu">gam</span>(blood_valericAcid       <span class="sc">~</span> sampleID_reference <span class="sc">+</span> <span class="fu">s</span>(obs_type, <span class="at">bs =</span> <span class="st">&quot;re&quot;</span>), <span class="at">data =</span> datJoint_blood)</span>
+<span id="cb14-16"><a href="#cb14-16" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-17"><a href="#cb14-17" aria-hidden="true" tabindex="-1"></a><span class="co"># helper function to calculate the ICC</span></span>
+<span id="cb14-18"><a href="#cb14-18" aria-hidden="true" tabindex="-1"></a>calc_ICC <span class="ot">&lt;-</span> <span class="cf">function</span>(model) {</span>
+<span id="cb14-19"><a href="#cb14-19" aria-hidden="true" tabindex="-1"></a>  sigma2 <span class="ot">&lt;-</span> model<span class="sc">$</span>sig2</span>
+<span id="cb14-20"><a href="#cb14-20" aria-hidden="true" tabindex="-1"></a>  delta  <span class="ot">&lt;-</span> mgcv<span class="sc">::</span><span class="fu">gam.vcomp</span>(model) <span class="sc">%&gt;%</span> <span class="fu">unname</span>()</span>
+<span id="cb14-21"><a href="#cb14-21" aria-hidden="true" tabindex="-1"></a>  delta2 <span class="ot">&lt;-</span> delta<span class="sc">^</span><span class="dv">2</span></span>
+<span id="cb14-22"><a href="#cb14-22" aria-hidden="true" tabindex="-1"></a>  icc    <span class="ot">&lt;-</span> delta2 <span class="sc">/</span> (delta2 <span class="sc">+</span> sigma2)</span>
+<span id="cb14-23"><a href="#cb14-23" aria-hidden="true" tabindex="-1"></a>  <span class="fu">return</span>(icc)</span>
+<span id="cb14-24"><a href="#cb14-24" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb14-25"><a href="#cb14-25" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-26"><a href="#cb14-26" aria-hidden="true" tabindex="-1"></a><span class="co"># create an overview table</span></span>
+<span id="cb14-27"><a href="#cb14-27" aria-hidden="true" tabindex="-1"></a>dat_ICC <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(<span class="at">marker =</span> <span class="fu">c</span>(<span class="st">&quot;methylbutyric acid&quot;</span>, <span class="st">&quot;acetic acid&quot;</span>, <span class="st">&quot;butyric acid&quot;</span>, <span class="st">&quot;hexanoic acid&quot;</span>,</span>
+<span id="cb14-28"><a href="#cb14-28" aria-hidden="true" tabindex="-1"></a>                                       <span class="st">&quot;isobutyric acid&quot;</span>, <span class="st">&quot;isovaleric acid&quot;</span>, <span class="st">&quot;propionic acid&quot;</span>, <span class="st">&quot;valeric acid&quot;</span>),</span>
+<span id="cb14-29"><a href="#cb14-29" aria-hidden="true" tabindex="-1"></a>                      <span class="at">ICC    =</span> <span class="fu">c</span>(<span class="fu">calc_ICC</span>(model_mbA),</span>
+<span id="cb14-30"><a href="#cb14-30" aria-hidden="true" tabindex="-1"></a>                                 <span class="fu">calc_ICC</span>(model_acA),</span>
+<span id="cb14-31"><a href="#cb14-31" aria-hidden="true" tabindex="-1"></a>                                 <span class="fu">calc_ICC</span>(model_btA),</span>
+<span id="cb14-32"><a href="#cb14-32" aria-hidden="true" tabindex="-1"></a>                                 <span class="fu">calc_ICC</span>(model_hxA),</span>
+<span id="cb14-33"><a href="#cb14-33" aria-hidden="true" tabindex="-1"></a>                                 <span class="fu">calc_ICC</span>(model_ibA),</span>
+<span id="cb14-34"><a href="#cb14-34" aria-hidden="true" tabindex="-1"></a>                                 <span class="fu">calc_ICC</span>(model_ivA),</span>
+<span id="cb14-35"><a href="#cb14-35" aria-hidden="true" tabindex="-1"></a>                                 <span class="fu">calc_ICC</span>(model_ppA),</span>
+<span id="cb14-36"><a href="#cb14-36" aria-hidden="true" tabindex="-1"></a>                                 <span class="fu">calc_ICC</span>(model_vlA)))</span>
+<span id="cb14-37"><a href="#cb14-37" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-38"><a href="#cb14-38" aria-hidden="true" tabindex="-1"></a>dat_ICC <span class="sc">%&gt;%</span> </span>
+<span id="cb14-39"><a href="#cb14-39" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">ICC =</span> <span class="fu">round</span>(ICC, <span class="dv">2</span>)) <span class="sc">%&gt;%</span> </span>
+<span id="cb14-40"><a href="#cb14-40" aria-hidden="true" tabindex="-1"></a>  <span class="fu">kable</span>() <span class="sc">%&gt;%</span> </span>
+<span id="cb14-41"><a href="#cb14-41" aria-hidden="true" tabindex="-1"></a>  <span class="fu">kable_styling</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</details>
+<div class="cell-output-display">
+<table class="table table-sm table-striped small" data-quarto-postprocess="true">
+<thead>
+<tr class="header">
+<th style="text-align: left;" data-quarto-table-cell-role="th">marker</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">ICC</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;">methylbutyric acid</td>
+<td style="text-align: right;">0.04</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">acetic acid</td>
+<td style="text-align: right;">0.04</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">butyric acid</td>
+<td style="text-align: right;">0.00</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">hexanoic acid</td>
+<td style="text-align: right;">0.29</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">isobutyric acid</td>
+<td style="text-align: right;">0.16</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">isovaleric acid</td>
+<td style="text-align: right;">0.04</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">propionic acid</td>
+<td style="text-align: right;">0.00</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">valeric acid</td>
+<td style="text-align: right;">0.00</td>
+</tr>
+</tbody>
+</table>
+
+
+</div>
+</div>
+<p>Average ICC blood: 0.07</p>
+</section>
+<section id="check-reliability-of-stool-scfas" class="level2">
+<h2 class="anchored" data-anchor-id="check-reliability-of-stool-scfas">Check reliability of stool SCFAs</h2>
+<p>Intra-observer reliability</p>
+<p><strong>Correlations per sample</strong></p>
+<div class="cell">
+<details>
+<summary>Code</summary>
+<div class="sourceCode cell-code" id="cb15"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a><span class="co"># calculate correlations</span></span>
+<span id="cb15-2"><a href="#cb15-2" aria-hidden="true" tabindex="-1"></a>dat_corr <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(<span class="at">marker      =</span> <span class="fu">c</span>(<span class="st">&quot;methylbutyric acid&quot;</span>, <span class="st">&quot;acetic acid&quot;</span>, <span class="st">&quot;butyric acid&quot;</span>, <span class="st">&quot;hexanoic acid&quot;</span>,</span>
+<span id="cb15-3"><a href="#cb15-3" aria-hidden="true" tabindex="-1"></a>                                       <span class="st">&quot;isobutyric acid&quot;</span>, <span class="st">&quot;isovaleric acid&quot;</span>, <span class="st">&quot;propionic acid&quot;</span>, <span class="st">&quot;valeric acid&quot;</span>),</span>
+<span id="cb15-4"><a href="#cb15-4" aria-hidden="true" tabindex="-1"></a>                       <span class="at">correlation =</span> <span class="fu">c</span>(<span class="fu">cor</span>(<span class="at">x =</span> dat_stoolOrig<span class="sc">$</span>stool_methylbutyricAcid,</span>
+<span id="cb15-5"><a href="#cb15-5" aria-hidden="true" tabindex="-1"></a>                                           <span class="at">y =</span> dat_stoolDupl<span class="sc">$</span>stool_methylbutyricAcid),</span>
+<span id="cb15-6"><a href="#cb15-6" aria-hidden="true" tabindex="-1"></a>                                       <span class="fu">cor</span>(<span class="at">x =</span> dat_stoolOrig<span class="sc">$</span>stool_aceticAcid,</span>
+<span id="cb15-7"><a href="#cb15-7" aria-hidden="true" tabindex="-1"></a>                                           <span class="at">y =</span> dat_stoolDupl<span class="sc">$</span>stool_aceticAcid),</span>
+<span id="cb15-8"><a href="#cb15-8" aria-hidden="true" tabindex="-1"></a>                                       <span class="fu">cor</span>(<span class="at">x =</span> dat_stoolOrig<span class="sc">$</span>stool_butyricAcid,</span>
+<span id="cb15-9"><a href="#cb15-9" aria-hidden="true" tabindex="-1"></a>                                           <span class="at">y =</span> dat_stoolDupl<span class="sc">$</span>stool_butyricAcid),</span>
+<span id="cb15-10"><a href="#cb15-10" aria-hidden="true" tabindex="-1"></a>                                       <span class="fu">cor</span>(<span class="at">x =</span> dat_stoolOrig<span class="sc">$</span>stool_hexanoicAcid,</span>
+<span id="cb15-11"><a href="#cb15-11" aria-hidden="true" tabindex="-1"></a>                                           <span class="at">y =</span> dat_stoolDupl<span class="sc">$</span>stool_hexanoicAcid),</span>
+<span id="cb15-12"><a href="#cb15-12" aria-hidden="true" tabindex="-1"></a>                                       <span class="fu">cor</span>(<span class="at">x =</span> dat_stoolOrig<span class="sc">$</span>stool_isobutyricAcid,</span>
+<span id="cb15-13"><a href="#cb15-13" aria-hidden="true" tabindex="-1"></a>                                           <span class="at">y =</span> dat_stoolDupl<span class="sc">$</span>stool_isobutyricAcid),</span>
+<span id="cb15-14"><a href="#cb15-14" aria-hidden="true" tabindex="-1"></a>                                       <span class="fu">cor</span>(<span class="at">x =</span> dat_stoolOrig<span class="sc">$</span>stool_isovalericAcid,</span>
+<span id="cb15-15"><a href="#cb15-15" aria-hidden="true" tabindex="-1"></a>                                           <span class="at">y =</span> dat_stoolDupl<span class="sc">$</span>stool_isovalericAcid),</span>
+<span id="cb15-16"><a href="#cb15-16" aria-hidden="true" tabindex="-1"></a>                                       <span class="fu">cor</span>(<span class="at">x =</span> dat_stoolOrig<span class="sc">$</span>stool_propionicAcid,</span>
+<span id="cb15-17"><a href="#cb15-17" aria-hidden="true" tabindex="-1"></a>                                           <span class="at">y =</span> dat_stoolDupl<span class="sc">$</span>stool_propionicAcid),</span>
+<span id="cb15-18"><a href="#cb15-18" aria-hidden="true" tabindex="-1"></a>                                       <span class="fu">cor</span>(<span class="at">x =</span> dat_stoolOrig<span class="sc">$</span>stool_valericAcid,</span>
+<span id="cb15-19"><a href="#cb15-19" aria-hidden="true" tabindex="-1"></a>                                           <span class="at">y =</span> dat_stoolDupl<span class="sc">$</span>stool_valericAcid)))</span>
+<span id="cb15-20"><a href="#cb15-20" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb15-21"><a href="#cb15-21" aria-hidden="true" tabindex="-1"></a>dat_corr <span class="sc">%&gt;%</span> </span>
+<span id="cb15-22"><a href="#cb15-22" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">correlation =</span> <span class="fu">round</span>(correlation, <span class="dv">2</span>)) <span class="sc">%&gt;%</span> </span>
+<span id="cb15-23"><a href="#cb15-23" aria-hidden="true" tabindex="-1"></a>  <span class="fu">kable</span>() <span class="sc">%&gt;%</span> </span>
+<span id="cb15-24"><a href="#cb15-24" aria-hidden="true" tabindex="-1"></a>  <span class="fu">kable_styling</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</details>
+<div class="cell-output-display">
+<table class="table table-sm table-striped small" data-quarto-postprocess="true">
+<thead>
+<tr class="header">
+<th style="text-align: left;" data-quarto-table-cell-role="th">marker</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">correlation</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;">methylbutyric acid</td>
+<td style="text-align: right;">0.96</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">acetic acid</td>
+<td style="text-align: right;">0.95</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">butyric acid</td>
+<td style="text-align: right;">0.96</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">hexanoic acid</td>
+<td style="text-align: right;">0.98</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">isobutyric acid</td>
+<td style="text-align: right;">0.93</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">isovaleric acid</td>
+<td style="text-align: right;">0.94</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">propionic acid</td>
+<td style="text-align: right;">0.93</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">valeric acid</td>
+<td style="text-align: right;">0.93</td>
+</tr>
+</tbody>
+</table>
+
+
+</div>
+</div>
+<p>Average correlation: 0.95</p>
+<p><strong>Intra-Class Correlation</strong></p>
+<p>NOTE: ICC estimation is quite unstable cause of the limited number of duplicate measurements, and because of the often near perfect correlations (see above) which lead to only very little remaining unexplained rest variability in the ICC models.</p>
+<p>We estimate one ICC for every one of the 8 markers.<br>
+For each marker we first estimate the following linear mixed regression model:</p>
+<ul>
+<li>dependent variable: marker value</li>
+<li>independent variables: sample indicator (as fixed effect), binary indicator if ‘original’ or ‘duplicated’ sample (as random effect).</li>
+</ul>
+<p>Based on this model we then estimate the ICC based on the random effect variance <span class="math inline">\(\sigma^2_\delta\)</span> and the residual variance <span class="math inline">\(\sigma^2_\epsilon\)</span>: <span class="math display">\[
+\frac{\sigma^2_\delta}{\sigma^2_\delta + \sigma^2_\epsilon}
+\]</span></p>
+<div class="cell">
+<details>
+<summary>Code</summary>
+<div class="sourceCode cell-code" id="cb16"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="co"># create a joint dataset for the model estimation</span></span>
+<span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a>datJoint_stool <span class="ot">&lt;-</span> dat_stoolOrig <span class="sc">%&gt;%</span> </span>
+<span id="cb16-3"><a href="#cb16-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">obs_type =</span> <span class="st">&quot;orig&quot;</span>) <span class="sc">%&gt;%</span> </span>
+<span id="cb16-4"><a href="#cb16-4" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">bind_rows</span>(dat_stoolDupl <span class="sc">%&gt;%</span> <span class="fu">mutate</span>(<span class="at">obs_type =</span> <span class="st">&quot;dupl&quot;</span>)) <span class="sc">%&gt;%</span> </span>
+<span id="cb16-5"><a href="#cb16-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">sampleID_orig =</span> <span class="fu">factor</span>(sampleID_orig),</span>
+<span id="cb16-6"><a href="#cb16-6" aria-hidden="true" tabindex="-1"></a>         <span class="at">obs_type      =</span> <span class="fu">factor</span>(obs_type))</span>
+<span id="cb16-7"><a href="#cb16-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-8"><a href="#cb16-8" aria-hidden="true" tabindex="-1"></a><span class="co"># model estimation</span></span>
+<span id="cb16-9"><a href="#cb16-9" aria-hidden="true" tabindex="-1"></a>model_mbA <span class="ot">&lt;-</span> <span class="fu">gam</span>(stool_methylbutyricAcid <span class="sc">~</span> sampleID_orig <span class="sc">+</span> <span class="fu">s</span>(obs_type, <span class="at">bs =</span> <span class="st">&quot;re&quot;</span>), <span class="at">data =</span> datJoint_stool)</span>
+<span id="cb16-10"><a href="#cb16-10" aria-hidden="true" tabindex="-1"></a>model_acA <span class="ot">&lt;-</span> <span class="fu">gam</span>(stool_aceticAcid        <span class="sc">~</span> sampleID_orig <span class="sc">+</span> <span class="fu">s</span>(obs_type, <span class="at">bs =</span> <span class="st">&quot;re&quot;</span>), <span class="at">data =</span> datJoint_stool)</span>
+<span id="cb16-11"><a href="#cb16-11" aria-hidden="true" tabindex="-1"></a>model_btA <span class="ot">&lt;-</span> <span class="fu">gam</span>(stool_butyricAcid       <span class="sc">~</span> sampleID_orig <span class="sc">+</span> <span class="fu">s</span>(obs_type, <span class="at">bs =</span> <span class="st">&quot;re&quot;</span>), <span class="at">data =</span> datJoint_stool)</span>
+<span id="cb16-12"><a href="#cb16-12" aria-hidden="true" tabindex="-1"></a>model_hxA <span class="ot">&lt;-</span> <span class="fu">gam</span>(stool_hexanoicAcid      <span class="sc">~</span> sampleID_orig <span class="sc">+</span> <span class="fu">s</span>(obs_type, <span class="at">bs =</span> <span class="st">&quot;re&quot;</span>), <span class="at">data =</span> datJoint_stool)</span>
+<span id="cb16-13"><a href="#cb16-13" aria-hidden="true" tabindex="-1"></a>model_ibA <span class="ot">&lt;-</span> <span class="fu">gam</span>(stool_isobutyricAcid    <span class="sc">~</span> sampleID_orig <span class="sc">+</span> <span class="fu">s</span>(obs_type, <span class="at">bs =</span> <span class="st">&quot;re&quot;</span>), <span class="at">data =</span> datJoint_stool)</span>
+<span id="cb16-14"><a href="#cb16-14" aria-hidden="true" tabindex="-1"></a>model_ivA <span class="ot">&lt;-</span> <span class="fu">gam</span>(stool_isovalericAcid    <span class="sc">~</span> sampleID_orig <span class="sc">+</span> <span class="fu">s</span>(obs_type, <span class="at">bs =</span> <span class="st">&quot;re&quot;</span>), <span class="at">data =</span> datJoint_stool)</span>
+<span id="cb16-15"><a href="#cb16-15" aria-hidden="true" tabindex="-1"></a>model_ppA <span class="ot">&lt;-</span> <span class="fu">gam</span>(stool_propionicAcid     <span class="sc">~</span> sampleID_orig <span class="sc">+</span> <span class="fu">s</span>(obs_type, <span class="at">bs =</span> <span class="st">&quot;re&quot;</span>), <span class="at">data =</span> datJoint_stool)</span>
+<span id="cb16-16"><a href="#cb16-16" aria-hidden="true" tabindex="-1"></a>model_vlA <span class="ot">&lt;-</span> <span class="fu">gam</span>(stool_valericAcid       <span class="sc">~</span> sampleID_orig <span class="sc">+</span> <span class="fu">s</span>(obs_type, <span class="at">bs =</span> <span class="st">&quot;re&quot;</span>), <span class="at">data =</span> datJoint_stool)</span>
+<span id="cb16-17"><a href="#cb16-17" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-18"><a href="#cb16-18" aria-hidden="true" tabindex="-1"></a><span class="co"># helper function to calculate the ICC</span></span>
+<span id="cb16-19"><a href="#cb16-19" aria-hidden="true" tabindex="-1"></a>calc_ICC <span class="ot">&lt;-</span> <span class="cf">function</span>(model) {</span>
+<span id="cb16-20"><a href="#cb16-20" aria-hidden="true" tabindex="-1"></a>  sigma2 <span class="ot">&lt;-</span> model<span class="sc">$</span>sig2</span>
+<span id="cb16-21"><a href="#cb16-21" aria-hidden="true" tabindex="-1"></a>  delta  <span class="ot">&lt;-</span> mgcv<span class="sc">::</span><span class="fu">gam.vcomp</span>(model) <span class="sc">%&gt;%</span> <span class="fu">unname</span>()</span>
+<span id="cb16-22"><a href="#cb16-22" aria-hidden="true" tabindex="-1"></a>  delta2 <span class="ot">&lt;-</span> delta<span class="sc">^</span><span class="dv">2</span></span>
+<span id="cb16-23"><a href="#cb16-23" aria-hidden="true" tabindex="-1"></a>  icc    <span class="ot">&lt;-</span> delta2 <span class="sc">/</span> (delta2 <span class="sc">+</span> sigma2)</span>
+<span id="cb16-24"><a href="#cb16-24" aria-hidden="true" tabindex="-1"></a>  <span class="fu">return</span>(icc)</span>
+<span id="cb16-25"><a href="#cb16-25" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb16-26"><a href="#cb16-26" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-27"><a href="#cb16-27" aria-hidden="true" tabindex="-1"></a><span class="co"># create an overview table</span></span>
+<span id="cb16-28"><a href="#cb16-28" aria-hidden="true" tabindex="-1"></a>dat_ICC <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(<span class="at">marker =</span> <span class="fu">c</span>(<span class="st">&quot;methylbutyric acid&quot;</span>, <span class="st">&quot;acetic acid&quot;</span>, <span class="st">&quot;butyric acid&quot;</span>, <span class="st">&quot;hexanoic acid&quot;</span>,</span>
+<span id="cb16-29"><a href="#cb16-29" aria-hidden="true" tabindex="-1"></a>                                       <span class="st">&quot;isobutyric acid&quot;</span>, <span class="st">&quot;isovaleric acid&quot;</span>, <span class="st">&quot;propionic acid&quot;</span>, <span class="st">&quot;valeric acid&quot;</span>),</span>
+<span id="cb16-30"><a href="#cb16-30" aria-hidden="true" tabindex="-1"></a>                      <span class="at">ICC    =</span> <span class="fu">c</span>(<span class="fu">calc_ICC</span>(model_mbA),</span>
+<span id="cb16-31"><a href="#cb16-31" aria-hidden="true" tabindex="-1"></a>                                 <span class="fu">calc_ICC</span>(model_acA),</span>
+<span id="cb16-32"><a href="#cb16-32" aria-hidden="true" tabindex="-1"></a>                                 <span class="fu">calc_ICC</span>(model_btA),</span>
+<span id="cb16-33"><a href="#cb16-33" aria-hidden="true" tabindex="-1"></a>                                 <span class="fu">calc_ICC</span>(model_hxA),</span>
+<span id="cb16-34"><a href="#cb16-34" aria-hidden="true" tabindex="-1"></a>                                 <span class="fu">calc_ICC</span>(model_ibA),</span>
+<span id="cb16-35"><a href="#cb16-35" aria-hidden="true" tabindex="-1"></a>                                 <span class="fu">calc_ICC</span>(model_ivA),</span>
+<span id="cb16-36"><a href="#cb16-36" aria-hidden="true" tabindex="-1"></a>                                 <span class="fu">calc_ICC</span>(model_ppA),</span>
+<span id="cb16-37"><a href="#cb16-37" aria-hidden="true" tabindex="-1"></a>                                 <span class="fu">calc_ICC</span>(model_vlA)))</span>
+<span id="cb16-38"><a href="#cb16-38" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-39"><a href="#cb16-39" aria-hidden="true" tabindex="-1"></a>dat_ICC <span class="sc">%&gt;%</span> </span>
+<span id="cb16-40"><a href="#cb16-40" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">ICC =</span> <span class="fu">round</span>(ICC, <span class="dv">2</span>)) <span class="sc">%&gt;%</span> </span>
+<span id="cb16-41"><a href="#cb16-41" aria-hidden="true" tabindex="-1"></a>  <span class="fu">kable</span>() <span class="sc">%&gt;%</span> </span>
+<span id="cb16-42"><a href="#cb16-42" aria-hidden="true" tabindex="-1"></a>  <span class="fu">kable_styling</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</details>
+<div class="cell-output-display">
+<table class="table table-sm table-striped small" data-quarto-postprocess="true">
+<thead>
+<tr class="header">
+<th style="text-align: left;" data-quarto-table-cell-role="th">marker</th>
+<th style="text-align: right;" data-quarto-table-cell-role="th">ICC</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;">methylbutyric acid</td>
+<td style="text-align: right;">0.03</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">acetic acid</td>
+<td style="text-align: right;">0.00</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">butyric acid</td>
+<td style="text-align: right;">0.16</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">hexanoic acid</td>
+<td style="text-align: right;">0.00</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">isobutyric acid</td>
+<td style="text-align: right;">0.11</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">isovaleric acid</td>
+<td style="text-align: right;">0.03</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">propionic acid</td>
+<td style="text-align: right;">0.02</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">valeric acid</td>
+<td style="text-align: right;">0.11</td>
+</tr>
+</tbody>
+</table>
+
+
+</div>
+</div>
+<p>Average ICC stool: 0.06</p>
 </section>
 
 </main>
