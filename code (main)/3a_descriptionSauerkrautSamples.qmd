@@ -230,30 +230,49 @@ dat %>%
 
 ##### Figure for publication
 
+... with species marked as "Others" that have less than 0.1% rel. abundance in every fresh sauerkraut sample
+
 ```{r}
 #| message: false
 #| fig-width: 11
 #| fig-height: 5
 
+# helper table
+tab_sort_fresh <- dat %>% 
+  filter(!grepl("past", sample_glass)) %>% 
+  group_by(species) %>% 
+  summarize(sum_relAbd = sum(value, na.rm = TRUE),
+            max_relAbd = max(value, na.rm = TRUE)) %>% 
+  arrange(desc(sum_relAbd)) %>% 
+  filter(max_relAbd >= 0.1)
+
+# color vector
+col_vector_fresh <- c(RColorBrewer::brewer.pal(n = nrow(tab_sort_fresh), name = "Dark2"),
+                      "gray10")
+
 dat %>% 
   filter(!grepl("past", sample_glass)) %>% 
-  mutate(species_cat = case_when(species %in% tab_sort$species ~ species,
-                                 TRUE                          ~ "Others"),
+  mutate(species_cat = case_when(species %in% tab_sort_fresh$species ~ species,
+                                 TRUE                                ~ "Others"),
          sample_description = case_when(sample_description %in% c("1.1 frisch", "2.1a", "3.1a") ~ "sample 1",
                                         sample_description %in% c("1.2 frisch", "2.2a", "3.2a") ~ "sample 2",
                                         sample_description %in% c("1.3 frisch", "2.3a", "3.3a") ~ "sample 3")) %>% 
   group_by(sample_glass, sample_description, species_cat) %>% 
   summarize(value = sum(value, na.rm = TRUE)) %>% 
   mutate(species_cat = gsub(species_cat, pattern = "_", replacement = " "),
-         species_cat = factor(species_cat, levels = c(as.character(tab_sort$species) %>% gsub(pattern = "_", replacement = " "), "Others"))) %>% 
+         species_cat = factor(species_cat, levels = c(as.character(tab_sort_fresh$species) %>% gsub(pattern = "_", replacement = " "), "Others"))) %>% 
   ggplot(aes(x = sample_description, weight = value, fill = species_cat)) +
   geom_bar() +
   facet_grid(~ sample_glass, scales = "free") +
-  scale_fill_manual(values = col_vector) +
+  scale_fill_manual(values = col_vector_fresh) +
   scale_y_continuous("relative abundance", labels = function(x) { paste0(x, "%") }) +
   ggtitle("Species distribution in fresh sauerkraut samples") +
-  theme(axis.title.x    = element_blank(),
+  theme_minimal(base_size = 14) +
+  theme(plot.title      = element_text(hjust = 0.5),
+        plot.background = element_rect(fill = "white", color = "white"),
+        axis.title.x    = element_blank(),
         legend.title    = element_blank(),
+        legend.text     = element_text(size = 12),
         legend.position = "bottom",
         panel.grid.major.x = element_blank(),
         panel.grid.minor   = element_blank())
