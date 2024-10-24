@@ -1,0 +1,106 @@
+---
+title: "Sauerkraut study - Model-based Stool SCFA Analysis"
+format:
+  html:
+    toc: true
+    code-fold: true
+    embed-resources: true
+---
+
+```{r packages}
+#| warning: false
+
+library(sauerkrautTaxonomyBuddy)
+library(SummarizedExperiment) # microbiome analysis
+library(mia)                  # microbiome analysis
+
+library(dplyr)      # data handling
+library(tidyr)      # data transformation
+library(ggplot2)    # data visualization
+library(corrplot)   # correlation plots
+library(kableExtra) # print tables
+
+# set ggplot2 theme
+theme_set(
+  theme_minimal() +
+    theme(plot.title       = element_text(hjust = 0.5),
+          plot.subtitle    = element_text(hjust = 0.5),
+          panel.grid.minor = element_blank(),
+          plot.background  = element_rect(fill = "white", color = "white"))
+)
+```
+
+# Data preparation
+
+```{r set file paths}
+define_dataPaths()
+```
+
+```{r read data}
+#| warning: false
+
+tse <- readAndPrepare_mainTaxonomicData(path_groupInfoRdata               = path_groupInfoRdata,
+                                        path_participantRdata             = path_participantRdata,
+                                        path_samplesIDxlsx                = path_samplesIDxlsx,
+                                        path_dietInfoCsv                  = path_dietInfoCsv,
+                                        path_nutrientInfoCsv              = path_nutrientInfoCsv,
+                                        path_bloodMetabolomeXlsx          = path_bloodMetabolomeXlsx,
+                                        path_stoolMetabolomeXlsx          = path_stoolMetabolomeXlsx,
+                                        path_T4questXlsx                  = path_T4questXlsx,
+                                        path_stoolInfoXlsx                = path_stoolInfoXlsx,
+                                        path_bodyMeasuresXlsx             = path_bodyMeasuresXlsx,
+                                        path_absTaxonomyData              = path_absTaxonomyData,
+                                        path_relTaxonomyData              = path_relTaxonomyData,
+                                        path_sampleLookupXlsx             = path_sampleLookupXlsx,
+                                        path_krautLookupXlsx              = path_krautLookupXlsx,
+                                        path_bloodMarkerBostonRdata       = path_bloodMarkerBostonRdata,
+                                        path_bloodMarkerZentrallaborRdata = path_bloodMarkerZentrallaborRdata,
+                                        path_bloodMarkerBostonXlsx        = path_bloodMarkerBostonXlsx,
+                                        path_bloodMarkerZentrallaborXlsx  = path_bloodMarkerZentrallaborXlsx,
+                                        aggregation_level                 = "species",
+                                        exclude_sickParticipants          = "taxonomy paper")
+
+# data containing species abundances and SCFA measurements
+dat <- tse %>% mia::meltAssay(assay.type = "relAbd", add_row_data = TRUE, add_col_data = TRUE)
+```
+
+```{r}
+# remove follow-up measurements
+dat <- dat %>% 
+  filter(intervention != "FollowUp") %>% 
+  mutate(timepoint    = droplevels(timepoint),
+         period       = droplevels(period),
+         intervention = droplevels(intervention))
+
+
+# construct the intervention variable and the carry-over variable
+dat <- dat %>% 
+  mutate(intervention = case_when(treatment == "Baseline" ~ "Baseline",
+                                  TRUE                    ~ intervention))
+```
+
+
+# Compare A. hadrus with SCFA concentrations
+
+```{r}
+dat_hadrus <- dat %>% 
+  filter(species == "Anaerostipes_hadrus")
+```
+
+
+```{r}
+#| fig-width: 4
+#| fig-height: 14
+
+# save species concentrations in one dataset
+dat_sp <- dat_hadrus %>% select(relAbd)
+
+# save all SCFA variables in another dataset
+dat_SCFA <- dat_hadrus %>% select(contains("Acid"))
+
+# calculate a correlation matrix
+cor_matrix <- cor(dat_SCFA, dat_sp)
+
+# visualize the correlation matrix
+corrplot(cor_matrix, method = "number", addgrid.col = "gray90", tl.col = "gray20")
+```

@@ -109,7 +109,16 @@ dat_model <- dat_model %>%
                                   TRUE                        ~ "phase 1"),
          phase        = factor(phase))
 
-# categorize the age and bmi variables for testing category-specific intervention effects
+# save the average T1/T3 baseline Shannon diversity as individual variable
+dat_baselineDiv <- dat_model %>% 
+  filter(timepoint %in% c("T1", "T3")) %>% 
+  group_by(participant_id) %>% 
+  summarize(baseline_div = mean(diversity_shannon, na.rm = TRUE))
+dat_model <- dat_model %>% 
+  dplyr::left_join(dat_baselineDiv, by = "participant_id")
+
+# categorize the variables for testing category-specific intervention effects
+median_baselineDiv <- median(dat_model$baseline_div)
 dat_model <- dat_model %>% 
   mutate(age_centered50 = age - 50,
          bmi_centered25 = bmi_t0 - 25,
@@ -118,7 +127,13 @@ dat_model <- dat_model %>%
          age_cat = factor(age_cat),
          bmi_cat = case_when(bmi_t0 < 25 ~ paste0("[", floor(min(bmi_t0)), ", 25)"),
                              TRUE        ~ paste0("[25, ", ceiling(max(bmi_t0)), "]")),
-         bmi_cat = factor(bmi_cat))
+         bmi_cat = factor(bmi_cat),
+         dailyFiber_cat  = case_when(dailyConsumption_fiber >= 30 ~ ">= 30g",
+                                     TRUE                         ~ "< 30g"),
+         dailyFiber_cat  = factor(dailyFiber_cat),
+         baselineDiv_cat = case_when(baseline_div < median_baselineDiv ~ "[2.8, 3.85)",
+                                     TRUE                              ~ "[3.85, 4.4)"),
+         baselineDiv_cat = factor(baselineDiv_cat))
 ```
 
 ```{r lookup vectors}
@@ -200,7 +215,9 @@ compare_models <- function(y) {
   dat_model_changedRef <- dat_model %>% 
     mutate(gender  = relevel(gender,  ref = "W"),
            age_cat = relevel(age_cat, ref = "50-69"),
-           bmi_cat = relevel(bmi_cat, ref = "[25, 31]"))
+           bmi_cat = relevel(bmi_cat, ref = "[25, 31]"),
+           dailyFiber_cat  = relevel(dailyFiber_cat,  ref = ">= 30g"),
+           baselineDiv_cat = relevel(baselineDiv_cat, ref = "[3.85, 4.4)"))
   
   # all returned final models are estimated using REML,
   # all models used for testing potential interaction effects via likelihood ratio tests are estimated using ML
@@ -213,9 +230,15 @@ compare_models <- function(y) {
   m_gaussian_ageInt_ML <- estimate_model(dat_model, y, family = gaussian(),                       interaction_string = "intervention:age_cat", estimation_method = "ML")
   m_gaussian_bmiInt    <- estimate_model(dat_model, y, family = gaussian(),                       interaction_string = "intervention:bmi_cat")
   m_gaussian_bmiInt_ML <- estimate_model(dat_model, y, family = gaussian(),                       interaction_string = "intervention:bmi_cat", estimation_method = "ML")
+  m_gaussian_fibInt    <- estimate_model(dat_model, y, family = gaussian(),                       interaction_string = "intervention:dailyFiber_cat")
+  m_gaussian_fibInt_ML <- estimate_model(dat_model, y, family = gaussian(),                       interaction_string = "intervention:dailyFiber_cat", estimation_method = "ML")
+  m_gaussian_divInt    <- estimate_model(dat_model, y, family = gaussian(),                       interaction_string = "intervention:baselineDiv_cat")
+  m_gaussian_divInt_ML <- estimate_model(dat_model, y, family = gaussian(),                       interaction_string = "intervention:baselineDiv_cat", estimation_method = "ML")
   m_gaussian_sexInt_changedRef <- estimate_model(dat_model_changedRef, y, family = gaussian(),    interaction_string = "intervention:gender")
   m_gaussian_ageInt_changedRef <- estimate_model(dat_model_changedRef, y, family = gaussian(),    interaction_string = "intervention:age_cat")
   m_gaussian_bmiInt_changedRef <- estimate_model(dat_model_changedRef, y, family = gaussian(),    interaction_string = "intervention:bmi_cat")
+  m_gaussian_fibInt_changedRef <- estimate_model(dat_model_changedRef, y, family = gaussian(),    interaction_string = "intervention:dailyFiber_cat")
+  m_gaussian_divInt_changedRef <- estimate_model(dat_model_changedRef, y, family = gaussian(),    interaction_string = "intervention:baselineDiv_cat")
   
   m_gaussianLog           <- estimate_model(dat_model, y, family = gaussian(), transformation = log)
   m_gaussianLog_ML        <- estimate_model(dat_model, y, family = gaussian(), transformation = log, estimation_method = "ML")
@@ -225,9 +248,15 @@ compare_models <- function(y) {
   m_gaussianLog_ageInt_ML <- estimate_model(dat_model, y, family = gaussian(), transformation = log, interaction_string = "intervention:age_cat", estimation_method = "ML")
   m_gaussianLog_bmiInt    <- estimate_model(dat_model, y, family = gaussian(), transformation = log, interaction_string = "intervention:bmi_cat")
   m_gaussianLog_bmiInt_ML <- estimate_model(dat_model, y, family = gaussian(), transformation = log, interaction_string = "intervention:bmi_cat", estimation_method = "ML")
+  m_gaussianLog_fibInt    <- estimate_model(dat_model, y, family = gaussian(), transformation = log, interaction_string = "intervention:dailyFiber_cat")
+  m_gaussianLog_fibInt_ML <- estimate_model(dat_model, y, family = gaussian(), transformation = log, interaction_string = "intervention:dailyFiber_cat", estimation_method = "ML")
+  m_gaussianLog_divInt    <- estimate_model(dat_model, y, family = gaussian(), transformation = log, interaction_string = "intervention:baselineDiv_cat")
+  m_gaussianLog_divInt_ML <- estimate_model(dat_model, y, family = gaussian(), transformation = log, interaction_string = "intervention:baselineDiv_cat", estimation_method = "ML")
   m_gaussianLog_sexInt_changedRef <- estimate_model(dat_model_changedRef, y, family = gaussian(), transformation = log, interaction_string = "intervention:gender")
   m_gaussianLog_ageInt_changedRef <- estimate_model(dat_model_changedRef, y, family = gaussian(), transformation = log, interaction_string = "intervention:age_cat")
   m_gaussianLog_bmiInt_changedRef <- estimate_model(dat_model_changedRef, y, family = gaussian(), transformation = log, interaction_string = "intervention:bmi_cat")
+  m_gaussianLog_fibInt_changedRef <- estimate_model(dat_model_changedRef, y, family = gaussian(), transformation = log, interaction_string = "intervention:dailyFiber_cat")
+  m_gaussianLog_divInt_changedRef <- estimate_model(dat_model_changedRef, y, family = gaussian(), transformation = log, interaction_string = "intervention:baselineDiv_cat")
 
   m_gamma              <- estimate_model(dat_model, y, family = Gamma(link = "log"))
   m_gamma_ML           <- estimate_model(dat_model, y, family = Gamma(link = "log"), estimation_method = "ML")
@@ -237,94 +266,78 @@ compare_models <- function(y) {
   m_gamma_ageInt_ML    <- estimate_model(dat_model, y, family = Gamma(link = "log"),              interaction_string = "intervention:age_cat", estimation_method = "ML")
   m_gamma_bmiInt       <- estimate_model(dat_model, y, family = Gamma(link = "log"),              interaction_string = "intervention:bmi_cat")
   m_gamma_bmiInt_ML    <- estimate_model(dat_model, y, family = Gamma(link = "log"),              interaction_string = "intervention:bmi_cat", estimation_method = "ML")
+  m_gamma_fibInt       <- estimate_model(dat_model, y, family = Gamma(link = "log"),              interaction_string = "intervention:dailyFiber_cat")
+  m_gamma_fibInt_ML    <- estimate_model(dat_model, y, family = Gamma(link = "log"),              interaction_string = "intervention:dailyFiber_cat", estimation_method = "ML")
+  m_gamma_divInt       <- estimate_model(dat_model, y, family = Gamma(link = "log"),              interaction_string = "intervention:baselineDiv_cat")
+  m_gamma_divInt_ML    <- estimate_model(dat_model, y, family = Gamma(link = "log"),              interaction_string = "intervention:baselineDiv_cat", estimation_method = "ML")
   m_gamma_sexInt_changedRef <- estimate_model(dat_model_changedRef, y, family = Gamma(link = "log"), interaction_string = "intervention:gender")
   m_gamma_ageInt_changedRef <- estimate_model(dat_model_changedRef, y, family = Gamma(link = "log"), interaction_string = "intervention:age_cat")
   m_gamma_bmiInt_changedRef <- estimate_model(dat_model_changedRef, y, family = Gamma(link = "log"), interaction_string = "intervention:bmi_cat")
+  m_gamma_fibInt_changedRef <- estimate_model(dat_model_changedRef, y, family = Gamma(link = "log"), interaction_string = "intervention:dailyFiber_cat")
+  m_gamma_divInt_changedRef <- estimate_model(dat_model_changedRef, y, family = Gamma(link = "log"), interaction_string = "intervention:baselineDiv_cat")
   
   # 1) table of explained deviances and tests against the base model
   p_gs_sexInt    <- anova.gam(m_gaussian_ML,    m_gaussian_sexInt_ML,    test = "Chisq")$`Pr(>Chi)`[2] %>% round(4)
   p_gs_ageInt    <- anova.gam(m_gaussian_ML,    m_gaussian_ageInt_ML,    test = "Chisq")$`Pr(>Chi)`[2] %>% round(4)
   p_gs_bmiInt    <- anova.gam(m_gaussian_ML,    m_gaussian_bmiInt_ML,    test = "Chisq")$`Pr(>Chi)`[2] %>% round(4)
+  p_gs_fibInt    <- anova.gam(m_gaussian_ML,    m_gaussian_fibInt_ML,    test = "Chisq")$`Pr(>Chi)`[2] %>% round(4)
+  p_gs_divInt    <- anova.gam(m_gaussian_ML,    m_gaussian_divInt_ML,    test = "Chisq")$`Pr(>Chi)`[2] %>% round(4)
   p_gsLog_sexInt <- anova.gam(m_gaussianLog_ML, m_gaussianLog_sexInt_ML, test = "Chisq")$`Pr(>Chi)`[2] %>% round(4)
   p_gsLog_ageInt <- anova.gam(m_gaussianLog_ML, m_gaussianLog_ageInt_ML, test = "Chisq")$`Pr(>Chi)`[2] %>% round(4)
   p_gsLog_bmiInt <- anova.gam(m_gaussianLog_ML, m_gaussianLog_bmiInt_ML, test = "Chisq")$`Pr(>Chi)`[2] %>% round(4)
+  p_gsLog_fibInt <- anova.gam(m_gaussianLog_ML, m_gaussianLog_fibInt_ML, test = "Chisq")$`Pr(>Chi)`[2] %>% round(4)
+  p_gsLog_divInt <- anova.gam(m_gaussianLog_ML, m_gaussianLog_divInt_ML, test = "Chisq")$`Pr(>Chi)`[2] %>% round(4)
   p_gm_sexInt    <- anova.gam(m_gamma_ML,       m_gamma_sexInt_ML,       test = "Chisq")$`Pr(>Chi)`[2] %>% round(4)
   p_gm_ageInt    <- anova.gam(m_gamma_ML,       m_gamma_ageInt_ML,       test = "Chisq")$`Pr(>Chi)`[2] %>% round(4)
   p_gm_bmiInt    <- anova.gam(m_gamma_ML,       m_gamma_bmiInt_ML,       test = "Chisq")$`Pr(>Chi)`[2] %>% round(4)
+  p_gm_fibInt    <- anova.gam(m_gamma_ML,       m_gamma_fibInt_ML,       test = "Chisq")$`Pr(>Chi)`[2] %>% round(4)
+  p_gm_divInt    <- anova.gam(m_gamma_ML,       m_gamma_divInt_ML,       test = "Chisq")$`Pr(>Chi)`[2] %>% round(4)
   
   # in case the simpler model has lower (= better) deviance, no p-values is calculated by 'anova.gam'
   p_gs_sexInt    <- ifelse(is.na(p_gs_sexInt),    0.9999, p_gs_sexInt)
   p_gs_ageInt    <- ifelse(is.na(p_gs_ageInt),    0.9999, p_gs_ageInt)
   p_gs_bmiInt    <- ifelse(is.na(p_gs_bmiInt),    0.9999, p_gs_bmiInt)
+  p_gs_fibInt    <- ifelse(is.na(p_gs_fibInt),    0.9999, p_gs_fibInt)
+  p_gs_divInt    <- ifelse(is.na(p_gs_divInt),    0.9999, p_gs_divInt)
   p_gsLog_sexInt <- ifelse(is.na(p_gsLog_sexInt), 0.9999, p_gsLog_sexInt)
   p_gsLog_ageInt <- ifelse(is.na(p_gsLog_ageInt), 0.9999, p_gsLog_ageInt)
   p_gsLog_bmiInt <- ifelse(is.na(p_gsLog_bmiInt), 0.9999, p_gsLog_bmiInt)
+  p_gsLog_fibInt <- ifelse(is.na(p_gsLog_fibInt), 0.9999, p_gsLog_fibInt)
+  p_gsLog_divInt <- ifelse(is.na(p_gsLog_divInt), 0.9999, p_gsLog_divInt)
   p_gm_sexInt    <- ifelse(is.na(p_gm_sexInt),    0.9999, p_gm_sexInt)
   p_gm_ageInt    <- ifelse(is.na(p_gm_ageInt),    0.9999, p_gm_ageInt)
   p_gm_bmiInt    <- ifelse(is.na(p_gm_bmiInt),    0.9999, p_gm_bmiInt)
+  p_gm_fibInt    <- ifelse(is.na(p_gm_fibInt),    0.9999, p_gm_fibInt)
+  p_gm_divInt    <- ifelse(is.na(p_gm_divInt),    0.9999, p_gm_divInt)
   
-  tab_dev <- data.frame("Model"             = c("Raw intervention effect", "Intervention effect by gender", "Intervention effect by age group", "Intervention effect by BMI group"),
+  tab_dev <- data.frame("Model"             = c("Raw intervention effect", "Intervention effect by gender", "Intervention effect by age group", "Intervention effect by BMI group", "Intervention effect by fiber group", "Intervention effect by baseline diversity"),
                         "Gaussian"          = c(paste0(round(100 * summary(m_gaussian_ML)$dev.expl,           1), "%"),
                                                 paste0(round(100 * summary(m_gaussian_sexInt_ML)$dev.expl,    1), "% (p = ", p_gs_sexInt, ")"),
                                                 paste0(round(100 * summary(m_gaussian_ageInt_ML)$dev.expl,    1), "% (p = ", p_gs_ageInt, ")"),
-                                                paste0(round(100 * summary(m_gaussian_bmiInt_ML)$dev.expl,    1), "% (p = ", p_gs_bmiInt, ")")),
+                                                paste0(round(100 * summary(m_gaussian_bmiInt_ML)$dev.expl,    1), "% (p = ", p_gs_bmiInt, ")"),
+                                                paste0(round(100 * summary(m_gaussian_fibInt_ML)$dev.expl,    1), "% (p = ", p_gs_fibInt, ")"),
+                                                paste0(round(100 * summary(m_gaussian_divInt_ML)$dev.expl,    1), "% (p = ", p_gs_divInt, ")")),
                         "Gaussian_logTrafo" = c(paste0(round(100 * summary(m_gaussianLog_ML)$dev.expl,        1), "%"),
                                                 paste0(round(100 * summary(m_gaussianLog_sexInt_ML)$dev.expl, 1), "% (p = ", p_gsLog_sexInt, ")"),
                                                 paste0(round(100 * summary(m_gaussianLog_ageInt_ML)$dev.expl, 1), "% (p = ", p_gsLog_ageInt, ")"),
-                                                paste0(round(100 * summary(m_gaussianLog_bmiInt_ML)$dev.expl, 1), "% (p = ", p_gsLog_bmiInt, ")")),
+                                                paste0(round(100 * summary(m_gaussianLog_bmiInt_ML)$dev.expl, 1), "% (p = ", p_gsLog_bmiInt, ")"),
+                                                paste0(round(100 * summary(m_gaussianLog_fibInt_ML)$dev.expl, 1), "% (p = ", p_gsLog_fibInt, ")"),
+                                                paste0(round(100 * summary(m_gaussianLog_divInt_ML)$dev.expl, 1), "% (p = ", p_gsLog_divInt, ")")),
                         "Gamma"             = c(paste0(round(100 * summary(m_gamma_ML)$dev.expl,              1), "%"),
                                                 paste0(round(100 * summary(m_gamma_sexInt_ML)$dev.expl,       1), "% (p = ", p_gm_sexInt, ")"),
                                                 paste0(round(100 * summary(m_gamma_ageInt_ML)$dev.expl,       1), "% (p = ", p_gm_ageInt, ")"),
-                                                paste0(round(100 * summary(m_gamma_bmiInt_ML)$dev.expl,       1), "% (p = ", p_gm_bmiInt, ")")))
+                                                paste0(round(100 * summary(m_gamma_bmiInt_ML)$dev.expl,       1), "% (p = ", p_gm_bmiInt, ")"),
+                                                paste0(round(100 * summary(m_gamma_fibInt_ML)$dev.expl,       1), "% (p = ", p_gm_fibInt, ")"),
+                                                paste0(round(100 * summary(m_gamma_divInt_ML)$dev.expl,       1), "% (p = ", p_gm_divInt, ")")))
   colnames(tab_dev)[2:4] <- c("Gaussian", "Gaussian (log trafo)", "Gamma")
   
-  # 2) table of intervention effects (to judge the potential interactions)
-  est_gs <- summary(m_gaussian)$p.table[,"Estimate"]
-  est_gm <- summary(m_gamma)$p.table[,"Estimate"]
-  tab_est_noInt <- data.frame("Model"    = "Raw intervention effect",
-                              "Effect"   = c("Fresh vs. baseline", "Pasteurized vs. baseline"),
-                              "Gaussian" = est_gs[c("interventionFresh", "interventionPasteurized")] %>% unname() %>% round(1),
-                              "Gamma"    = est_gm[c("interventionFresh", "interventionPasteurized")] %>% unname() %>% round(3))
-
-  est_gsA <- summary(m_gaussian_ageInt)$p.table[,"Estimate"]
-  est_gmA <- summary(m_gamma_ageInt)$p.table[,"Estimate"]
-  tab_est_ageInt <- data.frame("Model"    = "Intervention effect by age group",
-                               "Effect"   = paste(rep(c("Fresh vs. baseline", "Pasteurized vs. baseline"), each  = 2),
-                                                  rep(c("- age 21-49", "- age 50-69"),                     times = 2)),
-                               "Gaussian" = c(est_gsA[["interventionFresh"]],
-                                              est_gsA[["interventionFresh"]] + est_gsA[["interventionFresh:age_cat50-69"]] - est_gsA[["interventionBaseline:age_cat50-69"]],
-                                              est_gsA[["interventionPasteurized"]],
-                                              est_gsA[["interventionPasteurized"]] + est_gsA[["interventionPasteurized:age_cat50-69"]] - est_gsA[["interventionBaseline:age_cat50-69"]]),
-                               "Gamma"    = c(est_gmA[["interventionFresh"]],
-                                              est_gmA[["interventionFresh"]] + est_gmA[["interventionFresh:age_cat50-69"]] - est_gmA[["interventionBaseline:age_cat50-69"]],
-                                              est_gmA[["interventionPasteurized"]],
-                                              est_gmA[["interventionPasteurized"]] + est_gmA[["interventionPasteurized:age_cat50-69"]] - est_gmA[["interventionBaseline:age_cat50-69"]]))
-
-  est_gsB <- summary(m_gaussian_bmiInt)$p.table[,"Estimate"]
-  est_gmB <- summary(m_gamma_bmiInt)$p.table[,"Estimate"]
-  tab_est_bmiInt <- data.frame("Model" = "Intervention effect by BMI group",
-                               "Effect"   = paste(rep(c("Fresh vs. baseline", "Pasteurized vs. baseline"), each  = 2),
-                                                  rep(c("- BMI [18, 25)", "- BMI [25, 31]",                times = 2))),
-                               "Gaussian" = c(est_gsB[["interventionFresh"]],
-                                              est_gsB[["interventionFresh"]] + est_gsB[["interventionFresh:bmi_cat[25, 31]"]] - est_gsB[["interventionBaseline:bmi_cat[25, 31]"]],
-                                              est_gsB[["interventionPasteurized"]],
-                                              est_gsB[["interventionPasteurized"]] + est_gsB[["interventionPasteurized:bmi_cat[25, 31]"]] - est_gsB[["interventionBaseline:bmi_cat[25, 31]"]]),
-                               "Gamma"    = c(est_gmB[["interventionFresh"]],
-                                              est_gmB[["interventionFresh"]] + est_gmB[["interventionFresh:bmi_cat[25, 31]"]] - est_gmB[["interventionBaseline:bmi_cat[25, 31]"]],
-                                              est_gmB[["interventionPasteurized"]],
-                                              est_gmB[["interventionPasteurized"]] + est_gmB[["interventionPasteurized:bmi_cat[25, 31]"]] - est_gmB[["interventionBaseline:bmi_cat[25, 31]"]]))
-
-  tab_effects <- tab_est_noInt %>% dplyr::bind_rows(tab_est_ageInt) %>% dplyr::bind_rows(tab_est_bmiInt) %>%
-    mutate(Gaussian = round(Gaussian, 2),
-           Gamma    = round(Gamma, 3))
-  
-  # 3) residual plots
+  # 2) residual plots
   gg_residuals <- plot_residuals(m_gaussian, "Gaussian\nwithout interaction") +
     plot_residuals(m_gaussianLog, "Gaussian with log trafo\nwithout interaction") +
     plot_residuals(m_gamma, "Gamma\nwithout interaction") +
     patchwork::plot_layout(nrow = 1)
   
-  # 4) QQ plots
+  # 3) QQ plots
   qq_gaussian    <- m_gaussian %>% mgcViz::getViz() %>% mgcViz::qq.gamViz() +
     ggtitle("Gaussian") + theme_minimal() + theme(plot.title = element_text(hjust = 0.5))
   qq_gaussianLog <- m_gaussianLog %>% mgcViz::getViz() %>% mgcViz::qq.gamViz() +
@@ -337,25 +350,36 @@ compare_models <- function(y) {
        "model_gaussian_sexInt"    = m_gaussian_sexInt,
        "model_gaussian_ageInt"    = m_gaussian_ageInt,
        "model_gaussian_bmiInt"    = m_gaussian_bmiInt,
+       "model_gaussian_fibInt"    = m_gaussian_fibInt,
+       "model_gaussian_divInt"    = m_gaussian_divInt,
        "model_gaussian_sexInt_changedRef" = m_gaussian_sexInt_changedRef,
        "model_gaussian_ageInt_changedRef" = m_gaussian_ageInt_changedRef,
        "model_gaussian_bmiInt_changedRef" = m_gaussian_bmiInt_changedRef,
+       "model_gaussian_fibInt_changedRef" = m_gaussian_fibInt_changedRef,
+       "model_gaussian_divInt_changedRef" = m_gaussian_divInt_changedRef,
        "model_gaussianLog"        = m_gaussianLog,
        "model_gaussianLog_sexInt" = m_gaussianLog_sexInt,
        "model_gaussianLog_ageInt" = m_gaussianLog_ageInt,
        "model_gaussianLog_bmiInt" = m_gaussianLog_bmiInt,
+       "model_gaussianLog_fibInt" = m_gaussianLog_fibInt,
+       "model_gaussianLog_divInt" = m_gaussianLog_divInt,
        "model_gaussianLog_sexInt_changedRef" = m_gaussianLog_sexInt_changedRef,
        "model_gaussianLog_ageInt_changedRef" = m_gaussianLog_ageInt_changedRef,
        "model_gaussianLog_bmiInt_changedRef" = m_gaussianLog_bmiInt_changedRef,
+       "model_gaussianLog_fibInt_changedRef" = m_gaussianLog_fibInt_changedRef,
+       "model_gaussianLog_divInt_changedRef" = m_gaussianLog_divInt_changedRef,
        "model_gamma"              = m_gamma,
        "model_gamma_sexInt"       = m_gamma_sexInt,
        "model_gamma_ageInt"       = m_gamma_ageInt,
        "model_gamma_bmiInt"       = m_gamma_bmiInt,
+       "model_gamma_fibInt"       = m_gamma_fibInt,
+       "model_gamma_divInt"       = m_gamma_divInt,
        "model_gamma_sexInt_changedRef" = m_gamma_sexInt_changedRef,
        "model_gamma_ageInt_changedRef" = m_gamma_ageInt_changedRef,
        "model_gamma_bmiInt_changedRef" = m_gamma_bmiInt_changedRef,
+       "model_gamma_fibInt_changedRef" = m_gamma_fibInt_changedRef,
+       "model_gamma_divInt_changedRef" = m_gamma_divInt_changedRef,
        "tab_explainedDeviances"   = tab_dev,
-       "tab_effects"              = tab_effects,
        "gg_residuals"             = gg_residuals,
        "qq_gaussian"              = qq_gaussian,
        "qq_gaussianLog"           = qq_gaussianLog,
@@ -363,6 +387,37 @@ compare_models <- function(y) {
     return()
 }
 ```
+
+
+# Test for carry-over effect
+
+Perform the test for the presence of a potential carry-over effect following
+Wellek & Blettner (2012, Box 1).  
+Only perform it regarding the Shannon diversity as one central
+alpha diversity measure.
+
+```{r}
+#| message: false
+
+# create data vectors
+dat_test <- dat_model %>% 
+  arrange(participant_id, timepoint) %>% 
+  group_by(participant_id, phase) %>% 
+  summarize(group                  = first(group),
+            interventionEffect_raw = diversity_shannon[2] - diversity_shannon[1]) %>% 
+  ungroup() %>% 
+  group_by(participant_id) %>% 
+  summarize(group = first(group),
+            sum_rawInterventionEffects = sum(interventionEffect_raw))
+groupA_vector <- dat_test %>% filter(group == "Fresh first") %>% pull(sum_rawInterventionEffects)
+groupB_vector <- dat_test %>% filter(group == "Pasteurized first") %>% pull(sum_rawInterventionEffects)
+
+# compare the vectors using an "ordinary" unpaired t-test
+test_result <- t.test(x = groupA_vector, y = groupB_vector)
+```
+
+p-value: `r test_result$p.value %>% round(4)`
+
 
 
 # Shannon diversity
@@ -388,8 +443,6 @@ Share of deviance explained (including p-values for testing the respective inter
 outputList_dvs <- compare_models("diversity_shannon")
 
 outputList_dvs$tab_explainedDeviances %>% kable() %>% kable_styling()
-# outputList_dvs$tab_effects %>% filter(!grepl("BMI", Model)) %>% kable() %>%
-#   kable_styling() %>% group_rows("Intervention by age", 3, 6)
 outputList_dvs$gg_residuals
 mgcViz::gridPrint(outputList_dvs$qq_gaussian, outputList_dvs$qq_gaussianLog, outputList_dvs$qq_gamma, nrow = 1)
 ```
@@ -414,6 +467,10 @@ m_dvs_ageInt            <- outputList_dvs$model_gaussian_ageInt
 m_dvs_ageInt_changedRef <- outputList_dvs$model_gaussian_ageInt_changedRef
 m_dvs_bmiInt            <- outputList_dvs$model_gaussian_bmiInt
 m_dvs_bmiInt_changedRef <- outputList_dvs$model_gaussian_bmiInt_changedRef
+m_dvs_fibInt            <- outputList_dvs$model_gaussian_fibInt
+m_dvs_fibInt_changedRef <- outputList_dvs$model_gaussian_fibInt_changedRef
+m_dvs_divInt            <- outputList_dvs$model_gaussian_divInt
+m_dvs_divInt_changedRef <- outputList_dvs$model_gaussian_divInt_changedRef
 ```
 
 
@@ -465,6 +522,10 @@ m_dvi_ageInt            <- outputList_dvi$model_gaussian_ageInt
 m_dvi_ageInt_changedRef <- outputList_dvi$model_gaussian_ageInt_changedRef
 m_dvi_bmiInt            <- outputList_dvi$model_gaussian_bmiInt
 m_dvi_bmiInt_changedRef <- outputList_dvi$model_gaussian_bmiInt_changedRef
+m_dvi_fibInt            <- outputList_dvi$model_gaussian_fibInt
+m_dvi_fibInt_changedRef <- outputList_dvi$model_gaussian_fibInt_changedRef
+m_dvi_divInt            <- outputList_dvi$model_gaussian_divInt
+m_dvi_divInt_changedRef <- outputList_dvi$model_gaussian_divInt_changedRef
 ```
 
 
@@ -515,6 +576,10 @@ m_rno_ageInt            <- outputList_rno$model_gaussian_ageInt
 m_rno_ageInt_changedRef <- outputList_rno$model_gaussian_ageInt_changedRef
 m_rno_bmiInt            <- outputList_rno$model_gaussian_bmiInt
 m_rno_bmiInt_changedRef <- outputList_rno$model_gaussian_bmiInt_changedRef
+m_rno_fibInt            <- outputList_rno$model_gaussian_fibInt
+m_rno_fibInt_changedRef <- outputList_rno$model_gaussian_fibInt_changedRef
+m_rno_divInt            <- outputList_rno$model_gaussian_divInt
+m_rno_divInt_changedRef <- outputList_rno$model_gaussian_divInt_changedRef
 ```
 
 
@@ -565,6 +630,10 @@ m_rnh_ageInt            <- outputList_rnh$model_gaussian_ageInt
 m_rnh_ageInt_changedRef <- outputList_rnh$model_gaussian_ageInt_changedRef
 m_rnh_bmiInt            <- outputList_rnh$model_gaussian_bmiInt
 m_rnh_bmiInt_changedRef <- outputList_rnh$model_gaussian_bmiInt_changedRef
+m_rnh_fibInt            <- outputList_rnh$model_gaussian_fibInt
+m_rnh_fibInt_changedRef <- outputList_rnh$model_gaussian_fibInt_changedRef
+m_rnh_divInt            <- outputList_rnh$model_gaussian_divInt
+m_rnh_divInt_changedRef <- outputList_rnh$model_gaussian_divInt_changedRef
 ```
 
 
@@ -615,6 +684,10 @@ m_enp_ageInt            <- outputList_enp$model_gaussian_ageInt
 m_enp_ageInt_changedRef <- outputList_enp$model_gaussian_ageInt_changedRef
 m_enp_bmiInt            <- outputList_enp$model_gaussian_bmiInt
 m_enp_bmiInt_changedRef <- outputList_enp$model_gaussian_bmiInt_changedRef
+m_enp_fibInt            <- outputList_enp$model_gaussian_fibInt
+m_enp_fibInt_changedRef <- outputList_enp$model_gaussian_fibInt_changedRef
+m_enp_divInt            <- outputList_enp$model_gaussian_divInt
+m_enp_divInt_changedRef <- outputList_enp$model_gaussian_divInt_changedRef
 ```
 
 
@@ -665,6 +738,10 @@ m_ens_ageInt            <- outputList_ens$model_gaussianLog_ageInt
 m_ens_ageInt_changedRef <- outputList_ens$model_gaussianLog_ageInt_changedRef
 m_ens_bmiInt            <- outputList_ens$model_gaussianLog_bmiInt
 m_ens_bmiInt_changedRef <- outputList_ens$model_gaussianLog_bmiInt_changedRef
+m_ens_fibInt            <- outputList_ens$model_gaussianLog_fibInt
+m_ens_fibInt_changedRef <- outputList_ens$model_gaussianLog_fibInt_changedRef
+m_ens_divInt            <- outputList_ens$model_gaussianLog_divInt
+m_ens_divInt_changedRef <- outputList_ens$model_gaussianLog_divInt_changedRef
 ```
 
 
@@ -715,6 +792,10 @@ m_dbp_ageInt            <- outputList_dbp$model_gamma_ageInt
 m_dbp_ageInt_changedRef <- outputList_dbp$model_gamma_ageInt_changedRef
 m_dbp_bmiInt            <- outputList_dbp$model_gamma_bmiInt
 m_dbp_bmiInt_changedRef <- outputList_dbp$model_gamma_bmiInt_changedRef
+m_dbp_fibInt            <- outputList_dbp$model_gamma_fibInt
+m_dbp_fibInt_changedRef <- outputList_dbp$model_gamma_fibInt_changedRef
+m_dbp_divInt            <- outputList_dbp$model_gamma_divInt
+m_dbp_divInt_changedRef <- outputList_dbp$model_gamma_divInt_changedRef
 ```
 
 
@@ -765,6 +846,10 @@ m_dca_ageInt            <- outputList_dca$model_gaussian_ageInt
 m_dca_ageInt_changedRef <- outputList_dca$model_gaussian_ageInt_changedRef
 m_dca_bmiInt            <- outputList_dca$model_gaussian_bmiInt
 m_dca_bmiInt_changedRef <- outputList_dca$model_gaussian_bmiInt_changedRef
+m_dca_fibInt            <- outputList_dca$model_gaussian_fibInt
+m_dca_fibInt_changedRef <- outputList_dca$model_gaussian_fibInt_changedRef
+m_dca_divInt            <- outputList_dca$model_gaussian_divInt
+m_dca_divInt_changedRef <- outputList_dca$model_gaussian_divInt_changedRef
 ```
 
 
@@ -817,6 +902,10 @@ m_rar_ageInt            <- outputList_rar$model_gaussian_ageInt
 m_rar_ageInt_changedRef <- outputList_rar$model_gaussian_ageInt_changedRef
 m_rar_bmiInt            <- outputList_rar$model_gaussian_bmiInt
 m_rar_bmiInt_changedRef <- outputList_rar$model_gaussian_bmiInt_changedRef
+m_rar_fibInt            <- outputList_rar$model_gaussian_fibInt
+m_rar_fibInt_changedRef <- outputList_rar$model_gaussian_fibInt_changedRef
+m_rar_divInt            <- outputList_rar$model_gaussian_divInt
+m_rar_divInt_changedRef <- outputList_rar$model_gaussian_divInt_changedRef
 ```
 
 
@@ -916,6 +1005,26 @@ model_bmiInt_list <- list("Diversity (Shannon)"          = list(m_dvs_bmiInt, m_
                           "Dominance (core abundance)"   = list(m_dca_bmiInt, m_dca_bmiInt_changedRef),
                           "Rarity (log modulo skewness)" = list(m_rar_bmiInt, m_rar_bmiInt_changedRef))
                           # "Divergence (to median)"       = list(m_dtm_bmiInt, m_dtm_bmiInt_changedRef))
+model_fibInt_list <- list("Diversity (Shannon)"          = list(m_dvs_fibInt, m_dvs_fibInt_changedRef),
+                          "Diversity (inv. Simpson)"     = list(m_dvi_fibInt, m_dvi_fibInt_changedRef),
+                          "Richness (observed)"          = list(m_rno_fibInt, m_rno_fibInt_changedRef),
+                          "Richness (Hill)"              = list(m_rnh_fibInt, m_rnh_fibInt_changedRef),
+                          "Evenness (Pielou)"            = list(m_enp_fibInt, m_enp_fibInt_changedRef),
+                          "Evenness (Simpson)"           = list(m_ens_fibInt, m_ens_fibInt_changedRef),
+                          "Dominance (DBP)"              = list(m_dbp_fibInt, m_dbp_fibInt_changedRef),
+                          "Dominance (core abundance)"   = list(m_dca_fibInt, m_dca_fibInt_changedRef),
+                          "Rarity (log modulo skewness)" = list(m_rar_fibInt, m_rar_fibInt_changedRef))
+                          # "Divergence (to median)"       = list(m_dtm_fibInt, m_dtm_fibInt_changedRef))
+model_divInt_list <- list("Diversity (Shannon)"          = list(m_dvs_divInt, m_dvs_divInt_changedRef),
+                          "Diversity (inv. Simpson)"     = list(m_dvi_divInt, m_dvi_divInt_changedRef),
+                          "Richness (observed)"          = list(m_rno_divInt, m_rno_divInt_changedRef),
+                          "Richness (Hill)"              = list(m_rnh_divInt, m_rnh_divInt_changedRef),
+                          "Evenness (Pielou)"            = list(m_enp_divInt, m_enp_divInt_changedRef),
+                          "Evenness (Simpson)"           = list(m_ens_divInt, m_ens_divInt_changedRef),
+                          "Dominance (DBP)"              = list(m_dbp_divInt, m_dbp_divInt_changedRef),
+                          "Dominance (core abundance)"   = list(m_dca_divInt, m_dca_divInt_changedRef),
+                          "Rarity (log modulo skewness)" = list(m_rar_divInt, m_rar_divInt_changedRef))
+                          # "Divergence (to median)"       = list(m_dtm_divInt, m_dtm_divInt_changedRef))
 # create a lookup list for the final model type
 modelType_list <- list("Diversity (Shannon)"          = "Gaussian",
                        "Diversity (inv. Simpson)"     = "Gaussian",
@@ -1130,15 +1239,15 @@ gg_exp
 ```
 
 
-## Interactions: Intervention by sex
+## Interactions: Intervention by baseline diversity
 
 ```{r}
 # create a results table with all effects
-modelResults_sexInt_list <- lapply(names(model_names), function(x) {
-
+modelResults_divInt_list <- lapply(names(model_names), function(x) {
+  
   variable         <- model_names[x] %>% unname()
-  model            <- model_sexInt_list[[x]][[1]]
-  model_changedRef <- model_sexInt_list[[x]][[2]]
+  model            <- model_divInt_list[[x]][[1]]
+  model_changedRef <- model_divInt_list[[x]][[2]]
   model_type       <- modelType_list[[x]]
 
   log_wasApplied <- (model_type %in% c("Gamma", "log Gaussian"))
@@ -1147,12 +1256,12 @@ modelResults_sexInt_list <- lapply(names(model_names), function(x) {
     mutate(parameter   = row.names(.)) %>%
     filter(grepl("intervention", parameter),
            !grepl(":", parameter)) %>% 
-    mutate(gender = levels(dat_model$gender)[1])
+    mutate(div_group = levels(dat_model$baselineDiv_cat)[1])
   results_dat2 <- summary(model_changedRef)$p.table %>% as.data.frame() %>%
     mutate(parameter   = row.names(.)) %>%
     filter(grepl("intervention", parameter),
            !grepl(":", parameter)) %>% 
-    mutate(gender = levels(dat_model$gender)[2])
+    mutate(div_group = levels(dat_model$baselineDiv_cat)[2])
   results_dat <- results_dat1 %>% dplyr::bind_rows(results_dat2) %>% 
     dplyr::rename(estimate   = "Estimate",
                   se         = "Std. Error",
@@ -1178,17 +1287,17 @@ modelResults_sexInt_list <- lapply(names(model_names), function(x) {
   }
 
   results_dat <- results_dat %>%
-    select(model, model_type, gender, parameter, estimate, CI_lower, CI_upper, contains("standardized"), contains("exp"), pvalue)
+    select(model, model_type, div_group, parameter, estimate, CI_lower, CI_upper, contains("standardized"), contains("exp"), pvalue)
   row.names(results_dat) <- NULL
 
   return(results_dat)
 })
-results_dat_sexInt <- modelResults_sexInt_list %>% bind_rows() %>%
-  mutate(model        = factor(model, levels = names(model_names)),
+results_dat_divInt <- modelResults_divInt_list %>% bind_rows() %>%
+  mutate(model       = factor(model, levels = names(model_names)),
          model_group  = sapply(as.character(model), function(x) { strsplit(x, split = " \\(")[[1]][1] }),
          model_group  = factor(model_group, levels = unique(model_group)),
-         xCoord_shift = case_when(gender == min(gender) ~ -0.15,
-                                  TRUE                  ~ 0.15))
+         xCoord_shift = case_when(div_group == min(div_group) ~ -0.15,
+                                  TRUE                        ~ 0.15))
 ```
 
 ```{r}
@@ -1196,8 +1305,8 @@ results_dat_sexInt <- modelResults_sexInt_list %>% bind_rows() %>%
 #| fig.height: 5
 
 # 1) effects of Gaussian models
-ylim_gaussianInt <- c(-.8, .8)
-plot_dat_sexInt <- results_dat_sexInt %>% 
+ylim_gaussianInt <- c(-1.2, 1.2)
+plot_dat_divInt <- results_dat_divInt %>% 
   filter(model_type  == "Gaussian") %>% 
   mutate(parameter = factor(parameter, levels = c("interventionFresh", "interventionPasteurized"),
                             labels = c("fresh intervention", "pasteurized intervention")),
@@ -1206,29 +1315,30 @@ plot_dat_sexInt <- results_dat_sexInt %>%
                             labels = levels(model) %>% gsub(pattern = " \\(Blood)", replacement = "")),
          model_xCoord = as.numeric(model) + xCoord_shift)
 
-gg_gaussian_sexInt <- plot_dat_sexInt %>% 
+gg_gaussian_divInt <- plot_dat_divInt %>% 
   ggplot(aes(x = model_xCoord, y = estimate_standardized, color = model_group, fill = model_group)) +
   geom_hline(yintercept = 0, linetype = 2, col = "gray30") +
-  geom_pointrange(aes(ymin = CI_lower_standardized, ymax = CI_upper_standardized, shape = gender), size = 0.25) +
-  scale_x_continuous(breaks = 1:length(levels(plot_dat_sexInt$model)), labels = levels(plot_dat_sexInt$model)) +
+  geom_pointrange(aes(ymin = CI_lower_standardized, ymax = CI_upper_standardized, shape = div_group), size = 0.25) +
+  scale_x_continuous(breaks = 1:length(levels(plot_dat_divInt$model)), labels = levels(plot_dat_divInt$model)) +
   scale_y_continuous("standardized estimate", limits = ylim_gaussianInt,
-                     breaks = c(-.8,-.4,0,.4,.8),
-                     labels = c("-0.8", "-0.4", "0", "+0.4", "+0.8")) +
+                     breaks = c(-1,-.5,0,.5,1),
+                     labels = c("-1", "-0.5", "0", "+0.5", "+1")) +
   scale_color_brewer(palette = "Dark2", guide = "none") +
   scale_fill_brewer(palette = "Dark2", guide = "none") +
-  scale_shape_manual("sex", values = c(25,24)) +
+  scale_shape_manual("baseline diversity group", values = c(25,24)) +
   facet_wrap(~ parameter) +
-  ggtitle("sex-specific Intervention effects in Gaussian models") +
+  ggtitle("diversity-specific Intervention effects in Gaussian models") +
   theme(axis.text.x        = element_text(hjust = 1, angle = 45),
         axis.title.x       = element_blank(),
         panel.grid.minor.y = element_line(color = "gray96"),
         panel.grid.major.x = element_blank(),
         legend.position    = "bottom")
-gg_gaussian_sexInt
+gg_gaussian_divInt
+
 
 # 2) effects of log Gaussian and Gamma models
-ylim_logInt <- c(.6,1.4)
-plot_dat_sexInt_exp <- results_dat_sexInt %>% 
+ylim_logInt <- c(.5,1.6)
+plot_dat_divInt_exp <- results_dat_divInt %>% 
   filter(model_type  != "Gaussian") %>% 
   mutate(parameter = factor(parameter, levels = c("interventionFresh", "interventionPasteurized"),
                             labels = c("fresh intervention", "pasteurized intervention")),
@@ -1237,27 +1347,28 @@ plot_dat_sexInt_exp <- results_dat_sexInt %>%
                             labels = levels(model) %>% gsub(pattern = " \\(Blood)", replacement = "")),
          model_xCoord = as.numeric(model) + xCoord_shift)
 
-gg_exp_sexInt <- plot_dat_sexInt_exp %>% 
+gg_exp_divInt <- plot_dat_divInt_exp %>% 
   ggplot(aes(x = model_xCoord, y = exp_estimate, color = model_group, fill = model_group)) +
   geom_hline(yintercept = 1, linetype = 2, col = "gray30") +
-  geom_pointrange(aes(ymin = exp_CIlower, ymax = exp_CIupper, shape = gender), size = 0.25) +
-  scale_x_continuous(breaks = 1:length(levels(plot_dat_sexInt_exp$model)), labels = levels(plot_dat_sexInt_exp$model)) +
+  geom_pointrange(aes(ymin = exp_CIlower, ymax = exp_CIupper, shape = div_group), size = 0.25) +
+  scale_x_continuous(breaks = 1:length(levels(plot_dat_divInt_exp$model)), labels = levels(plot_dat_divInt_exp$model)) +
   scale_y_continuous("estimate, on log2 scale", trans = "log2", limits = ylim_logInt,
-                     breaks = c(.6, .8, 1, 1.2, 1.4, 1.6),
-                     labels = c("-40%", "-20%", "0", "+20%", "+40%", "+60%"),
-                     minor_breaks = c(.5, .7, .9, 1.1, 1.3, 1.5)) +
+                     breaks = c(.6, .8, 1, 1.2, 1.4, 1.6, 1.8, 2),
+                     labels = c("-40%", "-20%", "0", "+20%", "+40%", "+60%", "+80%", "+100%"),
+                     minor_breaks = c(.5, .7, .9, 1.1, 1.3, 1.5, 1.7, 1.9)) +
   scale_color_brewer(palette = "Dark2", guide = "none") +
   scale_fill_brewer(palette = "Dark2", guide = "none") +
-  scale_shape_manual("sex", values = c(25,24)) +
+  scale_shape_manual("baseline diversity group", values = c(25,24)) +
   facet_wrap(~ parameter) +
-  ggtitle("sex-specific Intervention effects in log Gaussian and Gamma models") +
+  ggtitle("diversity-specific Intervention effects in log Gaussian and Gamma models") +
   theme(axis.text.x        = element_text(hjust = 1, angle = 45),
         axis.title.x       = element_blank(),
         panel.grid.minor.y = element_line(color = "gray96"),
         panel.grid.major.x = element_blank(),
         legend.position    = "bottom")
-gg_exp_sexInt
+gg_exp_divInt
 ```
+
 
 
 ## Interactions: Intervention by age
@@ -1391,6 +1502,138 @@ gg_exp_ageInt
 ```
 
 
+## Interactions: Intervention by sex
+
+```{r}
+# create a results table with all effects
+modelResults_sexInt_list <- lapply(names(model_names), function(x) {
+
+  variable         <- model_names[x] %>% unname()
+  model            <- model_sexInt_list[[x]][[1]]
+  model_changedRef <- model_sexInt_list[[x]][[2]]
+  model_type       <- modelType_list[[x]]
+
+  log_wasApplied <- (model_type %in% c("Gamma", "log Gaussian"))
+
+  results_dat1 <- summary(model)$p.table %>% as.data.frame() %>%
+    mutate(parameter   = row.names(.)) %>%
+    filter(grepl("intervention", parameter),
+           !grepl(":", parameter)) %>% 
+    mutate(gender = levels(dat_model$gender)[1])
+  results_dat2 <- summary(model_changedRef)$p.table %>% as.data.frame() %>%
+    mutate(parameter   = row.names(.)) %>%
+    filter(grepl("intervention", parameter),
+           !grepl(":", parameter)) %>% 
+    mutate(gender = levels(dat_model$gender)[2])
+  results_dat <- results_dat1 %>% dplyr::bind_rows(results_dat2) %>% 
+    dplyr::rename(estimate   = "Estimate",
+                  se         = "Std. Error",
+                  pvalue     = "Pr(>|t|)") %>%
+    mutate(model      = x,
+           model_type = model_type,
+           CI_lower   = estimate - qnorm(0.975) * se,
+           CI_upper   = estimate + qnorm(0.975) * se)
+
+  if (!log_wasApplied) { # standardize the effects by the standard deviation of the respnse variable
+    results_dat <- results_dat %>%
+      mutate(y_sd = sd(dat_model[[variable]], na.rm = TRUE),
+             estimate_standardized = estimate / y_sd,
+             se_standardized       = se / y_sd,
+             CI_lower_standardized = estimate_standardized - qnorm(0.975) * se_standardized,
+             CI_upper_standardized = estimate_standardized + qnorm(0.975) * se_standardized)
+
+  } else { # exponentiate the effects
+    results_dat <- results_dat %>%
+      mutate(exp_estimate = exp(estimate),
+             exp_CIlower  = exp(CI_lower),
+             exp_CIupper  = exp(CI_upper))
+  }
+
+  results_dat <- results_dat %>%
+    select(model, model_type, gender, parameter, estimate, CI_lower, CI_upper, contains("standardized"), contains("exp"), pvalue)
+  row.names(results_dat) <- NULL
+
+  return(results_dat)
+})
+results_dat_sexInt <- modelResults_sexInt_list %>% bind_rows() %>%
+  mutate(model        = factor(model, levels = names(model_names)),
+         model_group  = sapply(as.character(model), function(x) { strsplit(x, split = " \\(")[[1]][1] }),
+         model_group  = factor(model_group, levels = unique(model_group)),
+         xCoord_shift = case_when(gender == min(gender) ~ -0.15,
+                                  TRUE                  ~ 0.15))
+```
+
+```{r}
+#| fig.width: 8
+#| fig.height: 5
+
+# 1) effects of Gaussian models
+ylim_gaussianInt <- c(-.8, .8)
+plot_dat_sexInt <- results_dat_sexInt %>% 
+  filter(model_type  == "Gaussian") %>% 
+  mutate(parameter = factor(parameter, levels = c("interventionFresh", "interventionPasteurized"),
+                            labels = c("fresh intervention", "pasteurized intervention")),
+         gender    = factor(gender, levels = c("M", "W"), labels = c("male", "female")),
+         model     = droplevels(model),
+         model     = factor(model, levels = levels(model),
+                            labels = levels(model) %>% gsub(pattern = " \\(Blood)", replacement = "")),
+         model_xCoord = as.numeric(model) + xCoord_shift)
+
+gg_gaussian_sexInt <- plot_dat_sexInt %>% 
+  ggplot(aes(x = model_xCoord, y = estimate_standardized, color = model_group, fill = model_group)) +
+  geom_hline(yintercept = 0, linetype = 2, col = "gray30") +
+  geom_pointrange(aes(ymin = CI_lower_standardized, ymax = CI_upper_standardized, shape = gender), size = 0.25) +
+  scale_x_continuous(breaks = 1:length(levels(plot_dat_sexInt$model)), labels = levels(plot_dat_sexInt$model)) +
+  scale_y_continuous("standardized estimate", limits = ylim_gaussianInt,
+                     breaks = c(-.8,-.4,0,.4,.8),
+                     labels = c("-0.8", "-0.4", "0", "+0.4", "+0.8")) +
+  scale_color_brewer(palette = "Dark2", guide = "none") +
+  scale_fill_brewer(palette = "Dark2", guide = "none") +
+  scale_shape_manual("sex", values = c(25,24)) +
+  facet_wrap(~ parameter) +
+  ggtitle("sex-specific Intervention effects in Gaussian models") +
+  theme(axis.text.x        = element_text(hjust = 1, angle = 45),
+        axis.title.x       = element_blank(),
+        panel.grid.minor.y = element_line(color = "gray96"),
+        panel.grid.major.x = element_blank(),
+        legend.position    = "bottom")
+gg_gaussian_sexInt
+
+# 2) effects of log Gaussian and Gamma models
+ylim_logInt <- c(.6,1.4)
+plot_dat_sexInt_exp <- results_dat_sexInt %>% 
+  filter(model_type  != "Gaussian") %>% 
+  mutate(parameter = factor(parameter, levels = c("interventionFresh", "interventionPasteurized"),
+                            labels = c("fresh intervention", "pasteurized intervention")),
+         gender    = factor(gender, levels = c("M", "W"), labels = c("male", "female")),
+         model     = droplevels(model),
+         model     = factor(model, levels = levels(model),
+                            labels = levels(model) %>% gsub(pattern = " \\(Blood)", replacement = "")),
+         model_xCoord = as.numeric(model) + xCoord_shift)
+
+gg_exp_sexInt <- plot_dat_sexInt_exp %>% 
+  ggplot(aes(x = model_xCoord, y = exp_estimate, color = model_group, fill = model_group)) +
+  geom_hline(yintercept = 1, linetype = 2, col = "gray30") +
+  geom_pointrange(aes(ymin = exp_CIlower, ymax = exp_CIupper, shape = gender), size = 0.25) +
+  scale_x_continuous(breaks = 1:length(levels(plot_dat_sexInt_exp$model)), labels = levels(plot_dat_sexInt_exp$model)) +
+  scale_y_continuous("estimate, on log2 scale", trans = "log2", limits = ylim_logInt,
+                     breaks = c(.6, .8, 1, 1.2, 1.4, 1.6),
+                     labels = c("-40%", "-20%", "0", "+20%", "+40%", "+60%"),
+                     minor_breaks = c(.5, .7, .9, 1.1, 1.3, 1.5)) +
+  scale_color_brewer(palette = "Dark2", guide = "none") +
+  scale_fill_brewer(palette = "Dark2", guide = "none") +
+  scale_shape_manual("sex", values = c(25,24)) +
+  facet_wrap(~ parameter) +
+  ggtitle("sex-specific Intervention effects in log Gaussian and Gamma models") +
+  theme(axis.text.x        = element_text(hjust = 1, angle = 45),
+        axis.title.x       = element_blank(),
+        panel.grid.minor.y = element_line(color = "gray96"),
+        panel.grid.major.x = element_blank(),
+        legend.position    = "bottom")
+gg_exp_sexInt
+```
+
+
 ## Interactions: Intervention by BMI
 
 ```{r}
@@ -1521,6 +1764,136 @@ gg_exp_bmiInt <- plot_dat_bmiInt_exp %>%
 gg_exp_bmiInt
 ```
 
+## Interactions: Intervention by fiber
+
+```{r}
+# create a results table with all effects
+modelResults_fibInt_list <- lapply(names(model_names), function(x) {
+  
+  variable         <- model_names[x] %>% unname()
+  model            <- model_fibInt_list[[x]][[1]]
+  model_changedRef <- model_fibInt_list[[x]][[2]]
+  model_type       <- modelType_list[[x]]
+
+  log_wasApplied <- (model_type %in% c("Gamma", "log Gaussian"))
+
+  results_dat1 <- summary(model)$p.table %>% as.data.frame() %>%
+    mutate(parameter   = row.names(.)) %>%
+    filter(grepl("intervention", parameter),
+           !grepl(":", parameter)) %>% 
+    mutate(fib_group = levels(dat_model$dailyFiber_cat)[1])
+  results_dat2 <- summary(model_changedRef)$p.table %>% as.data.frame() %>%
+    mutate(parameter   = row.names(.)) %>%
+    filter(grepl("intervention", parameter),
+           !grepl(":", parameter)) %>% 
+    mutate(fib_group = levels(dat_model$dailyFiber_cat)[2])
+  results_dat <- results_dat1 %>% dplyr::bind_rows(results_dat2) %>% 
+    dplyr::rename(estimate   = "Estimate",
+                  se         = "Std. Error",
+                  pvalue     = "Pr(>|t|)") %>%
+    mutate(model      = x,
+           model_type = model_type,
+           CI_lower   = estimate - qnorm(0.975) * se,
+           CI_upper   = estimate + qnorm(0.975) * se)
+
+  if (!log_wasApplied) { # standardize the effects by the standard deviation of the respnse variable
+    results_dat <- results_dat %>%
+      mutate(y_sd = sd(dat_model[[variable]], na.rm = TRUE),
+             estimate_standardized = estimate / y_sd,
+             se_standardized       = se / y_sd,
+             CI_lower_standardized = estimate_standardized - qnorm(0.975) * se_standardized,
+             CI_upper_standardized = estimate_standardized + qnorm(0.975) * se_standardized)
+
+  } else { # exponentiate the effects
+    results_dat <- results_dat %>%
+      mutate(exp_estimate = exp(estimate),
+             exp_CIlower  = exp(CI_lower),
+             exp_CIupper  = exp(CI_upper))
+  }
+
+  results_dat <- results_dat %>%
+    select(model, model_type, fib_group, parameter, estimate, CI_lower, CI_upper, contains("standardized"), contains("exp"), pvalue)
+  row.names(results_dat) <- NULL
+
+  return(results_dat)
+})
+results_dat_fibInt <- modelResults_fibInt_list %>% bind_rows() %>%
+  mutate(model       = factor(model, levels = names(model_names)),
+         model_group  = sapply(as.character(model), function(x) { strsplit(x, split = " \\(")[[1]][1] }),
+         model_group  = factor(model_group, levels = unique(model_group)),
+         xCoord_shift = case_when(fib_group == min(fib_group) ~ -0.15,
+                                  TRUE                        ~ 0.15))
+```
+
+```{r}
+#| fig.width: 8
+#| fig.height: 5
+
+# 1) effects of Gaussian models
+ylim_gaussianInt <- c(-1.2, 1.2)
+plot_dat_fibInt <- results_dat_fibInt %>% 
+  filter(model_type  == "Gaussian") %>% 
+  mutate(parameter = factor(parameter, levels = c("interventionFresh", "interventionPasteurized"),
+                            labels = c("fresh intervention", "pasteurized intervention")),
+         model     = droplevels(model),
+         model     = factor(model, levels = levels(model),
+                            labels = levels(model) %>% gsub(pattern = " \\(Blood)", replacement = "")),
+         model_xCoord = as.numeric(model) + xCoord_shift)
+
+gg_gaussian_fibInt <- plot_dat_fibInt %>% 
+  ggplot(aes(x = model_xCoord, y = estimate_standardized, color = model_group, fill = model_group)) +
+  geom_hline(yintercept = 0, linetype = 2, col = "gray30") +
+  geom_pointrange(aes(ymin = CI_lower_standardized, ymax = CI_upper_standardized, shape = fib_group), size = 0.25) +
+  scale_x_continuous(breaks = 1:length(levels(plot_dat_fibInt$model)), labels = levels(plot_dat_fibInt$model)) +
+  scale_y_continuous("standardized estimate", limits = ylim_gaussianInt,
+                     breaks = c(-1,-.5,0,.5,1),
+                     labels = c("-1", "-0.5", "0", "+0.5", "+1")) +
+  scale_color_brewer(palette = "Dark2", guide = "none") +
+  scale_fill_brewer(palette = "Dark2", guide = "none") +
+  scale_shape_manual("fiber group", values = c(25,24)) +
+  facet_wrap(~ parameter) +
+  ggtitle("fiber-specific Intervention effects in Gaussian models") +
+  theme(axis.text.x        = element_text(hjust = 1, angle = 45),
+        axis.title.x       = element_blank(),
+        panel.grid.minor.y = element_line(color = "gray96"),
+        panel.grid.major.x = element_blank(),
+        legend.position    = "bottom")
+gg_gaussian_fibInt
+
+
+# 2) effects of log Gaussian and Gamma models
+ylim_logInt <- c(.5,1.6)
+plot_dat_fibInt_exp <- results_dat_fibInt %>% 
+  filter(model_type  != "Gaussian") %>% 
+  mutate(parameter = factor(parameter, levels = c("interventionFresh", "interventionPasteurized"),
+                            labels = c("fresh intervention", "pasteurized intervention")),
+         model     = droplevels(model),
+         model     = factor(model, levels = levels(model),
+                            labels = levels(model) %>% gsub(pattern = " \\(Blood)", replacement = "")),
+         model_xCoord = as.numeric(model) + xCoord_shift)
+
+gg_exp_fibInt <- plot_dat_fibInt_exp %>% 
+  ggplot(aes(x = model_xCoord, y = exp_estimate, color = model_group, fill = model_group)) +
+  geom_hline(yintercept = 1, linetype = 2, col = "gray30") +
+  geom_pointrange(aes(ymin = exp_CIlower, ymax = exp_CIupper, shape = fib_group), size = 0.25) +
+  scale_x_continuous(breaks = 1:length(levels(plot_dat_fibInt_exp$model)), labels = levels(plot_dat_fibInt_exp$model)) +
+  scale_y_continuous("estimate, on log2 scale", trans = "log2", limits = ylim_logInt,
+                     breaks = c(.6, .8, 1, 1.2, 1.4, 1.6, 1.8, 2),
+                     labels = c("-40%", "-20%", "0", "+20%", "+40%", "+60%", "+80%", "+100%"),
+                     minor_breaks = c(.5, .7, .9, 1.1, 1.3, 1.5, 1.7, 1.9)) +
+  scale_color_brewer(palette = "Dark2", guide = "none") +
+  scale_fill_brewer(palette = "Dark2", guide = "none") +
+  scale_shape_manual("fiber group", values = c(25,24)) +
+  facet_wrap(~ parameter) +
+  ggtitle("fiber-specific Intervention effects in log Gaussian and Gamma models") +
+  theme(axis.text.x        = element_text(hjust = 1, angle = 45),
+        axis.title.x       = element_blank(),
+        panel.grid.minor.y = element_line(color = "gray96"),
+        panel.grid.major.x = element_blank(),
+        legend.position    = "bottom")
+gg_exp_fibInt
+```
+
 
 # Corrected p-values for interaction effects
 
@@ -1557,6 +1930,26 @@ results_dat_bmiInt %>%
   select(model, model_type, bmi_group, parameter, pvalue_corrected, pvalue_significant) %>% 
   kable() %>% 
   kable_styling()
+
+# fiber
+results_dat_fibInt <- results_dat_fibInt %>% 
+  mutate(pvalue_corrected   = p.adjust(pvalue, method = "BH") %>% round(4),
+         pvalue_significant = ifelse(pvalue_corrected < 0.05, "yes", "no"))
+
+results_dat_fibInt %>% 
+  select(model, model_type, fib_group, parameter, pvalue_corrected, pvalue_significant) %>% 
+  kable() %>% 
+  kable_styling()
+
+# baseline diversity
+results_dat_divInt <- results_dat_divInt %>% 
+  mutate(pvalue_corrected   = p.adjust(pvalue, method = "BH") %>% round(4),
+         pvalue_significant = ifelse(pvalue_corrected < 0.05, "yes", "no"))
+
+results_dat_divInt %>% 
+  select(model, model_type, div_group, parameter, pvalue_corrected, pvalue_significant) %>% 
+  kable() %>% 
+  kable_styling()
 ```
 
 
@@ -1564,33 +1957,49 @@ results_dat_bmiInt %>%
 
 ```{r}
 #| column: page
-#| fig-width: 14
-#| fig-height: 10
+#| fig-width: 13
+#| fig-height: 4
 
-# 1) main model results
+# main model results
 (gg_gaussian + gg_exp) + patchwork::plot_layout(nrow = 1, widths = c(.67,.33))
 # ggsave("alphaDiversity_modelResults.png", width = 13, height = 4)
+```
 
-# 2) joint plot of all interactions
-gg_sex1 <- gg_gaussian_sexInt + theme(axis.text.x = element_blank())
-gg_sex2 <- gg_exp_sexInt + ggtitle("... in log Gaussian and Gamma models") +
+
+```{r}
+#| column: page
+#| fig-width: 16
+#| fig-height: 16
+
+# joint plot of all interactions
+gg_div1 <- gg_gaussian_divInt + theme(axis.text.x = element_blank())
+gg_div2 <- gg_exp_divInt + ggtitle("... in log Gaussian and Gamma models") +
   theme(axis.text.x = element_blank(), legend.position = "none")
 gg_age1 <- gg_gaussian_ageInt + theme(axis.text.x = element_blank())
 gg_age2 <- gg_exp_ageInt + ggtitle("... in log Gaussian and Gamma models") +
   theme(axis.text.x = element_blank(), legend.position = "none")
-gg_bmi1 <- gg_gaussian_bmiInt
+gg_sex1 <- gg_gaussian_sexInt + theme(axis.text.x = element_blank())
+gg_sex2 <- gg_exp_sexInt + ggtitle("... in log Gaussian and Gamma models") +
+  theme(axis.text.x = element_blank(), legend.position = "none")
+gg_bmi1 <- gg_gaussian_bmiInt + theme(axis.text.x = element_blank())
 gg_bmi2 <- gg_exp_bmiInt + ggtitle("... in log Gaussian and Gamma models") +
+  theme(axis.text.x = element_blank(), legend.position = "none")
+gg_fib1 <- gg_gaussian_fibInt
+gg_fib2 <- gg_exp_fibInt + ggtitle("... in log Gaussian and Gamma models") +
   theme(legend.position = "none")
 
 layout <- "
 AAB
 CCD
 EEF
+GGH
+IIJ
 "
-gg_sex1 + gg_sex2 + gg_age1 + gg_age2 + gg_bmi1 + gg_bmi2 +
+gg_div1 + gg_div2 + gg_age1 + gg_age2 + gg_sex1 + gg_sex2 + gg_bmi1 + gg_bmi2 + gg_fib1 + gg_fib2 +
   patchwork::plot_layout(design = layout)
-# ggsave("FigureS3_alphaDiversity_stratifications.png", width = 14, height = 10)
+# ggsave("FigureS3_alphaDiversity_stratifications.png", width = 16, height = 16)
 ```
+
 
 ## Joint figure of main effects and (p-value) significant BMI interactions
 
@@ -1631,12 +2040,13 @@ plot_dat_joint_gaussian <- plot_dat_joint_gaussian %>%
 
 # 2) create the Gaussian plot
 gg_joint_gaussian <- plot_dat_joint_gaussian %>% 
+  filter(!is.na(param_group)) %>% 
   ggplot(aes(x = model_xCoord, y = estimate_standardized, color = model_group, fill = model_group)) +
   geom_hline(yintercept = 0, linetype = 2, col = "gray30") +
   geom_linerange(aes(ymin = CI_lower_standardized, ymax = CI_upper_standardized, alpha = param_type)) +
   geom_point(aes(shape = param_type, size = param_type)) +
   scale_x_continuous(breaks = 1:length(levels(plot_dat_joint_gaussian$model)), labels = levels(plot_dat_joint_gaussian$model)) +
-  scale_y_continuous("standardized estimate", limits = ylim_gaussianInt,
+  scale_y_continuous("standardized estimate", limits = c(-.8, .8),
                      breaks = c(-.8,-.4,0,.4,.8),
                      labels = c("-0.8", "-0.4", "0", "+0.4", "+0.8")) +
   scale_color_brewer(palette = "Dark2", guide = "none") +
@@ -1656,8 +2066,7 @@ gg_joint_gaussian <- plot_dat_joint_gaussian %>%
         panel.grid.major.x = element_blank(),
         strip.text         = element_blank(),
         strip.background   = element_blank(),
-        legend.position    = "bottom",
-        legend.title       = element_blank())
+        legend.position    = "none")
 
 # 3) prepare plot data for multiplicative effects
 # retrieve main effect data
@@ -1691,15 +2100,17 @@ plot_dat_joint_exp <- plot_dat_joint_exp %>%
 
 # 4) create the multiplicative effects plot
 gg_joint_exp <- plot_dat_joint_exp %>% 
+  filter(!is.na(param_group)) %>% 
   ggplot(aes(x = model_xCoord, y = exp_estimate, color = model_group, fill = model_group)) +
   geom_hline(yintercept = 1, linetype = 2, col = "gray30") +
   geom_linerange(aes(ymin = exp_CIlower, ymax = exp_CIupper, alpha = param_type)) +
   geom_point(aes(shape = param_type, size = param_type)) +
-  scale_x_continuous(breaks = 1:length(levels(plot_dat_bmiInt_exp$model)), labels = levels(plot_dat_bmiInt_exp$model)) +
-  scale_y_continuous("estimate, on log2 scale", trans = "log2", limits = c(.6,1.4),
-                     breaks = c(.6, .8, 1, 1.2, 1.4),
-                     labels = c("-40%", "-20%", "0", "+20%", "+40%"),
-                     minor_breaks = c(.7, .9, 1.1, 1.3)) +
+  scale_x_continuous(breaks = 1:length(levels(plot_dat_bmiInt_exp$model)), labels = levels(plot_dat_bmiInt_exp$model),
+                     limits = c(.8, 2.2)) +
+  scale_y_continuous("estimate, on log2 scale", trans = "log2", limits = c(.8,1.2),
+                     breaks = c(.8, .9, 1, 1.1, 1.2),
+                     labels = c("-20%", "-10%", "0", "+10%", "+20%"),
+                     minor_breaks = c(.85, .95, 1.05, 1.15)) +
   scale_color_manual(values = c("#7570B3","#E72A8A"), guide = "none") +
   scale_fill_manual(values = c("#7570B3","#E72A8A"), guide = "none") +
   scale_shape_manual(values = c(19, 25, 24)) +
@@ -1717,8 +2128,7 @@ gg_joint_exp <- plot_dat_joint_exp %>%
         panel.grid.major.x = element_blank(),
         strip.text         = element_blank(),
         strip.background   = element_blank(),
-        legend.position    = "bottom",
-        legend.title       = element_blank())
+        legend.position    = "none")
 
 
 # 5) separate the plot title and the facet titles to plot it in a fancy version all above both plots

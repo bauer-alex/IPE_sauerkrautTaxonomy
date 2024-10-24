@@ -394,3 +394,56 @@ ggplot(plot_dat4, aes(y = phylum, x = SCFA)) +
         panel.grid  = element_blank())
 # ggsave("12_correlation_SCFAsVSphylum.png", height = 3, width = 6)
 ```
+
+
+# Figure for publication
+
+
+Average correlations between a set of relevant species and all the genes that are related to a specific SCFA.
+Species are sorted by their average correlation with Butyryl-CoA genes.
+
+```{r}
+#| fig-width: 8
+#| fig-height: 8
+#| message: false
+
+species_vector <- c("Anaerostipes_hadrus",
+                    "GGB9631_SGB15085",
+                    "Lacticaseibacillus_paracasei",
+                    "GGB9603_SGB15035",
+                    "GGB9561_SGB14972",
+                    "Phocaeicola_dorei",
+                    "GGB9512_SGB14909",
+                    "Blautia_faecis",
+                    "Anaerobutyricum_hallii",
+                    "Blautia_sp_AF19_10LB")
+
+plot_dat5 <- plot_dat %>% 
+  filter(species %in% species_vector) %>% 
+  mutate(species = gsub(pattern = "\\_", replacement = " ", species)) %>% 
+  group_by(species, SCFA) %>% 
+  summarize(phylum    = first(phylum),
+            mean_corr = mean(corr))
+
+# sort species according to the correlation with the Butyryl-CoA
+species_sort <- plot_dat5 %>% 
+  filter(SCFA == "Butyryl-CoA") %>% 
+  group_by(species) %>% 
+  summarize(avg_corr = mean(mean_corr)) %>% 
+  arrange(desc(avg_corr)) %>% 
+  pull(species)
+plot_dat5 <- plot_dat5 %>% 
+  mutate(species    = factor(species, levels = rev(species_sort)),
+         corr_label = round(mean_corr, 2))
+
+# create correlation matrix plot
+ggplot(plot_dat5, aes(y = species, x = SCFA)) +
+  geom_tile(aes(fill = mean_corr)) +
+  geom_text(aes(label = corr_label)) +
+  facet_grid(phylum ~ ., space = "free", scales = "free") +
+  scale_fill_gradient2("average\ncorrelation", low = "firebrick2", high = "dodgerblue2", mid = "white") +
+  theme(axis.text.x = element_text(angle = 90),
+        axis.ticks  = element_blank(),
+        panel.grid  = element_blank())
+# ggsave("correlation_SCFAsVSselectedSpecies.png", height = 8, width = 8)
+```

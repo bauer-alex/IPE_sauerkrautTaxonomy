@@ -402,7 +402,7 @@ gg_2ma    <- plot_bloodVSstoolSCFA(dat, "methylbutyricAcid") + theme(axis.title.
 
 (gg_aca | gg_ppa | gg_bta | gg_vla) /
   (gg_hxa | gg_iba | gg_iva | gg_2ma)
-# ggsave("FigureS15_SCFAs_stoolVSblood.png", width = 16, height = 6)
+# ggsave("FigureS12_SCFAs_stoolVSblood.png", width = 16, height = 6)
 ```
 
 

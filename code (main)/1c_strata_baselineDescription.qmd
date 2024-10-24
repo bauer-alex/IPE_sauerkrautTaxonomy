@@ -72,14 +72,29 @@ dat <- tse %>% colData() %>% as.data.frame()
 ```
 
 ```{r}
-# prepare data
+# save the average T1/T3 baseline Shannon diversity as individual variable
+dat_baselineDiv <- dat %>% 
+  filter(timepoint %in% c("T1", "T3")) %>% 
+  group_by(participant_id) %>% 
+  summarize(baseline_div = mean(diversity_shannon, na.rm = TRUE))
+dat <- dat %>% 
+  dplyr::left_join(dat_baselineDiv, by = "participant_id")
+
+# create binary versions for the interaction variables
+median_baselineDiv <- median(dat$baseline_div)
 dat <- dat %>% 
   mutate(age_cat = case_when(age < 50 ~ paste0(min(age), "-49"),
                              TRUE     ~ paste0("50-", max(age))),
          age_cat = factor(age_cat),
          bmi_cat = case_when(bmi_t0 < 25 ~ paste0("[", floor(min(bmi_t0)), ", 25)"),
                              TRUE        ~ paste0("[25, ", ceiling(max(bmi_t0)), "]")),
-         bmi_cat = factor(bmi_cat))
+         bmi_cat = factor(bmi_cat),
+         dailyFiber_cat  = case_when(dailyConsumption_fiber >= 30 ~ ">= 30g",
+                                     TRUE                         ~ "< 30g"),
+         dailyFiber_cat  = factor(dailyFiber_cat),
+         baselineDiv_cat = case_when(baseline_div < median_baselineDiv ~ "[2.8, 3.85)",
+                                     TRUE                              ~ "[3.85, 4.4)"),
+         baselineDiv_cat = factor(baselineDiv_cat))
 ```
 
 Limit data to baseline measurements (T1 and T3) and average over these baseline timepoints per person
@@ -91,6 +106,8 @@ dat <- dat %>%
   summarize(age                      = first(age),
             gender                   = first(gender),
             bmi_t0                   = first(bmi_t0),
+            baseline_shannonDiv      = first(baseline_div),
+            dailyConsumption_fiber   = first(dailyConsumption_fiber),
             hipWaistRatio_t0         = first(hipWaistRatio_t0),
             blood_aceticAcid         = mean(blood_aceticAcid, na.rm = TRUE),
             stool_aceticAcid         = mean(stool_aceticAcid, na.rm = TRUE),
@@ -134,6 +151,8 @@ create_subgroupDescription <- function(dat_subgroup) {
              age                      = mean(dat_subgroup$age) %>% round(),
              gender_male              = paste0(round(100 * prop.table(table(dat_subgroup$gender))["M"]), "%"),
              BMI                      = mean(dat_subgroup$bmi_t0)                   %>% round(1),
+             baseline_shannonDiv      = mean(dat_subgroup$baseline_shannonDiv) %>% round(2),
+             dailyConsumption_fiber   = mean(dat_subgroup$dailyConsumption_fiber) %>% round(2),
              hipWaistRatio            = mean(dat_subgroup$hipWaistRatio_t0, na.rm = TRUE) %>% round(2),
              blood_aceticAcid         = mean(dat_subgroup$blood_aceticAcid)               %>% round(1),
              stool_aceticAcid         = mean(dat_subgroup$stool_aceticAcid)               %>% round(1),
@@ -167,12 +186,16 @@ create_subgroupDescription <- function(dat_subgroup) {
 ```{r}
 #| column: page
 
-dat_subgroup_list <- list("age < 50"      = dat %>% filter(age < 50),
+dat_subgroup_list <- list("baseline div. < 3.85"  = dat %>% filter(baseline_shannonDiv <= median_baselineDiv),
+                          "baseline div. >= 3.85" = dat %>% filter(baseline_shannonDiv > median_baselineDiv),
+                          "age < 50"      = dat %>% filter(age < 50),
                           "age >= 50"     = dat %>% filter(age >= 50),
                           "gender male"   = dat %>% filter(gender == "M"),
                           "gender female" = dat %>% filter(gender == "W"),
                           "BMI < 25"      = dat %>% filter(bmi_t0 < 25),
-                          "BMI >= 25"     = dat %>% filter(bmi_t0 >= 25))
+                          "BMI >= 25"     = dat %>% filter(bmi_t0 >= 25),
+                          "daily fiber < 30g"     = dat %>% filter(dailyConsumption_fiber < 30),
+                          "daily fiber >= 30g"    = dat %>% filter(dailyConsumption_fiber >= 30))
 
 dat_results_list <- lapply(dat_subgroup_list, create_subgroupDescription)
 dat_results      <- dat_results_list %>% dplyr::bind_rows() %>% 
