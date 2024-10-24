@@ -3015,6 +3015,10 @@ gg_div <- dat_plot_divInt %>%
          intervention2 = gsub(intervention2, pattern = "div. high", replacement = "div. [3.85, 4.4)"),
          intervention3 = gsub(intervention,  pattern = "\n\\(div. low\\)",  replacement = ""),
          intervention3 = gsub(intervention3, pattern = "\n\\(div. high\\)", replacement = "")) %>%
+  mutate(intervention3 = factor(intervention3, levels = c("Fresh intervention\n(baseline div. low)",
+                                                          "Fresh intervention\n(baseline div. high)",
+                                                          "Pasteurized intervention\n(baseline div. low)",
+                                                          "Pasteurized intervention\n(baseline div. high)"))) %>% 
   ggplot(aes(x = intervention2, y = species)) +
   geom_tile(aes(fill = pvalue_signif)) +
   geom_text(aes(label = effect_label)) +
