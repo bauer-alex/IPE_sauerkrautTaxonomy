@@ -396,7 +396,7 @@ compare_models <- function(y) {
 
 Perform the test for the presence of a potential carry-over effect following
 Wellek & Blettner (2012, Box 1).  
-Only perform it regarding Butyric acid as one central SCFA.
+Only perform it regarding acetic acid as one central SCFA.
 
 ```{r}
 #| message: false
