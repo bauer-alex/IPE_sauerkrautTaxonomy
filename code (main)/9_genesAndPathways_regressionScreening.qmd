@@ -4289,7 +4289,7 @@ Focus on the four biggest phylum groups: Firmicutes, Bacteroidetes, Actinobacter
 
 ```{r}
 #| fig-width: 7
-#| fig-height: 4
+#| fig-height: 5
 
 # data preparation
 plot_dat_wide <- dat_PWresults %>% 
@@ -4298,45 +4298,61 @@ plot_dat_wide <- dat_PWresults %>%
   group_by(taxonomy_level1) %>% 
   dplyr::summarize(n_pathways                   = n(),
                    n_freshSignifEffects_overall = sum(freshInt_pvalue         < 0.05),
+                   n_freshSignifEffects_divLow  = sum(freshInt_divLow_pvalue  < 0.05),
+                   n_freshSignifEffects_divHigh = sum(freshInt_divHigh_pvalue < 0.05),
                    n_freshSignifEffects_ageLow  = sum(freshInt_ageLow_pvalue  < 0.05),
                    n_freshSignifEffects_ageHigh = sum(freshInt_ageHigh_pvalue < 0.05),
                    n_freshSignifEffects_sexM    = sum(freshInt_sexM_pvalue    < 0.05),
                    n_freshSignifEffects_sexW    = sum(freshInt_sexW_pvalue    < 0.05),
                    n_freshSignifEffects_bmiLow  = sum(freshInt_bmiLow_pvalue  < 0.05),
                    n_freshSignifEffects_bmiHigh = sum(freshInt_bmiHigh_pvalue < 0.05),
+                   n_freshSignifEffects_fibLow  = sum(freshInt_fibLow_pvalue  < 0.05),
+                   n_freshSignifEffects_fibHigh = sum(freshInt_fibHigh_pvalue < 0.05),
                    n_pastSignifEffects_overall  = sum(pastInt_pvalue          < 0.05),
+                   n_pastSignifEffects_divLow   = sum(pastInt_divLow_pvalue   < 0.05),
+                   n_pastSignifEffects_divHigh  = sum(pastInt_divHigh_pvalue  < 0.05),
                    n_pastSignifEffects_ageLow   = sum(pastInt_ageLow_pvalue   < 0.05),
                    n_pastSignifEffects_ageHigh  = sum(pastInt_ageHigh_pvalue  < 0.05),
                    n_pastSignifEffects_sexM     = sum(pastInt_sexM_pvalue     < 0.05),
                    n_pastSignifEffects_sexW     = sum(pastInt_sexW_pvalue     < 0.05),
                    n_pastSignifEffects_bmiLow   = sum(pastInt_bmiLow_pvalue   < 0.05),
-                   n_pastSignifEffects_bmiHigh  = sum(pastInt_bmiHigh_pvalue  < 0.05))
+                   n_pastSignifEffects_bmiHigh  = sum(pastInt_bmiHigh_pvalue  < 0.05),
+                   n_pastSignifEffects_fibLow   = sum(pastInt_fibLow_pvalue   < 0.05),
+                   n_pastSignifEffects_fibHigh  = sum(pastInt_fibHigh_pvalue  < 0.05))
 
 
 # reshape dataset to long format
 plot_dat_long <- data.frame(taxonomy_level1      = rep(plot_dat_wide$taxonomy_level1, times = sum(grepl("freshSignifEffects", colnames(plot_dat_wide)))),
                             n_pathways           = rep(plot_dat_wide$n_pathways, times = sum(grepl("freshSignifEffects", colnames(plot_dat_wide)))),
-                            effect_group         = rep(c("overall", "ageInt", "ageInt", "sexInt", "sexInt", "bmiInt", "bmiInt"),
+                            effect_group         = rep(c("overall", "divInt", "divInt", "ageInt", "ageInt", "sexInt", "sexInt", "bmiInt", "bmiInt", "fibInt", "fibInt"),
                                                        each = nrow(plot_dat_wide)),
-                            effect_type          = rep(c("overall", "ageLow", "ageHigh", "sexM", "sexW", "bmiLow", "bmiHigh"),
+                            effect_type          = rep(c("overall", "divLow", "divHigh", "ageLow", "ageHigh", "sexM", "sexW", "bmiLow", "bmiHigh", "fibLow", "fibHigh"),
                                                        each = nrow(plot_dat_wide)),
                             n_freshSignifEffects = c(plot_dat_wide$n_freshSignifEffects_overall,
+                                                     plot_dat_wide$n_freshSignifEffects_divLow,
+                                                     plot_dat_wide$n_freshSignifEffects_divHigh,
                                                      plot_dat_wide$n_freshSignifEffects_ageLow,
                                                      plot_dat_wide$n_freshSignifEffects_ageHigh,
                                                      plot_dat_wide$n_freshSignifEffects_sexM,
                                                      plot_dat_wide$n_freshSignifEffects_sexW,
                                                      plot_dat_wide$n_freshSignifEffects_bmiLow,
-                                                     plot_dat_wide$n_freshSignifEffects_bmiHigh),
+                                                     plot_dat_wide$n_freshSignifEffects_bmiHigh,
+                                                     plot_dat_wide$n_freshSignifEffects_fibLow,
+                                                     plot_dat_wide$n_freshSignifEffects_fibHigh),
                             n_pastSignifEffects  = c(plot_dat_wide$n_pastSignifEffects_overall,
+                                                     plot_dat_wide$n_pastSignifEffects_divLow,
+                                                     plot_dat_wide$n_pastSignifEffects_divHigh,
                                                      plot_dat_wide$n_pastSignifEffects_ageLow,
                                                      plot_dat_wide$n_pastSignifEffects_ageHigh,
                                                      plot_dat_wide$n_pastSignifEffects_sexM,
                                                      plot_dat_wide$n_pastSignifEffects_sexW,
                                                      plot_dat_wide$n_pastSignifEffects_bmiLow,
-                                                     plot_dat_wide$n_pastSignifEffects_bmiHigh)) %>% 
+                                                     plot_dat_wide$n_pastSignifEffects_bmiHigh,
+                                                     plot_dat_wide$n_pastSignifEffects_fibLow,
+                                                     plot_dat_wide$n_pastSignifEffects_fibHigh)) %>% 
   mutate(taxLevel1_label = paste0(taxonomy_level1, "\n", n_pathways, " pathways"),
-         effect_group    = factor(effect_group, levels = c("overall", "ageInt", "sexInt", "bmiInt")),
-         effect_type     = factor(effect_type, levels = rev(c("overall", "ageLow", "ageHigh", "sexM", "sexW", "bmiLow", "bmiHigh"))))
+         effect_group    = factor(effect_group, levels = c("overall", "divInt", "ageInt", "sexInt", "bmiInt", "fibInt")),
+         effect_type     = factor(effect_type, levels = rev(c("overall", "divLow", "divHigh", "ageLow", "ageHigh", "sexM", "sexW", "bmiLow", "bmiHigh", "fibLow", "fibHigh"))))
 
 # make the dataset even longer
 plot_dat_longer <- data.frame(taxonomy_level1 = rep(plot_dat_long$taxonomy_level1, times = 2),
@@ -4355,21 +4371,27 @@ plot_dat_longer <- data.frame(taxonomy_level1 = rep(plot_dat_long$taxonomy_level
   ungroup() %>% 
   mutate(fill_tiles = case_when(effect_type == "overall" ~ "no",
                                 TRUE ~ taxonomy_level1),
-         alpha_tiles = case_when(effect_type %in% c("ageLow", "sexM", "bmiLow") ~ 0.05,
+         alpha_tiles = case_when(effect_type %in% c("divLow", "ageLow", "sexM", "bmiLow", "fibLow") ~ 0.05,
                                  TRUE ~ 0.15))
 plot_dat_longer <- plot_dat_longer %>%
   mutate(taxLevel1_label = factor(taxLevel1_label, levels = plot_dat_longer %>% arrange(desc(n_pathways)) %>% 
                                     pull(taxLevel1_label) %>% unique()),
-         effect_type     = case_when(effect_type == "ageLow"  ~ "age 21-49",
+         effect_type     = case_when(effect_type == "divLow"  ~ "div. [2.8, 3.85)",
+                                     effect_type == "divHigh" ~ "div. [3.85, 4.4)",
+                                     effect_type == "ageLow"  ~ "age 21-49",
                                      effect_type == "ageHigh" ~ "age 50-69",
                                      effect_type == "sexM"    ~ "male",
                                      effect_type == "sexW"    ~ "female",
                                      effect_type == "bmiLow"  ~ "BMI [18, 25)",
                                      effect_type == "bmiHigh" ~ "BMI [25, 31]",
+                                     effect_type == "fibLow"  ~ "fiber (8, 30)",
+                                     effect_type == "fibHigh" ~ "fiber [30, 58)",
                                      TRUE                     ~ effect_type),
-         effect_type     = factor(effect_type, levels = c("BMI [25, 31]", "BMI [18, 25)",
+         effect_type     = factor(effect_type, levels = c("div. [3.85, 4.4)", "div. [2.8, 3.85)",
+                                                          "BMI [25, 31]", "BMI [18, 25)",
                                                           "female", "male",
-                                                          "age 50-69", "age 21-49", "overall")))
+                                                          "age 50-69", "age 21-49",
+                                                          "fiber [30, 58)", "fiber (8, 30)", "overall")))
 
 
 # create a color vector for color coding the interaction terms

@@ -2953,6 +2953,7 @@ plot_dat <- plot_dat %>%
 #| column: page
 #| fig-width: 13
 #| fig-height: 6
+#| message: false
 
 # 1) plot of overall effects
 gg_overall <- dat_plot_overall %>% 
@@ -3189,14 +3190,18 @@ gg_fib <- dat_plot_fibInt %>%
 # Average correlations between a set of relevant species and all the genes that are related to a specific SCFA.
 # Species are sorted by their average correlation with Butyryl-CoA genes.
 species_vector <- c("Anaerostipes_hadrus",
-                    "GGB9631_SGB15085",
+                    "Anaerobutyricum_hallii",
                     "Lacticaseibacillus_paracasei",
+                    "Clostridia_bacterium",
+                    "GGB9631_SGB15085",
                     "GGB9603_SGB15035",
                     "GGB9561_SGB14972",
-                    "Phocaeicola_dorei",
                     "GGB9512_SGB14909",
+                    "Phocaeicola_dorei",
                     "Blautia_faecis",
                     "Blautia_obeum")
+
+
 plot_dat <- plot_dat %>% 
   filter(species %in% species_vector) %>% 
   mutate(species = gsub(pattern = "\\_", replacement = " ", species)) %>% 
@@ -3221,7 +3226,8 @@ gg_corrMatrix <- plot_dat %>%
   ggplot(aes(y = species, x = SCFA)) +
   geom_tile(aes(fill = mean_corr)) +
   geom_text(aes(label = corr_label)) +
-  scale_fill_gradient2("average correlation with genes", low = "#A8896C", high = "#84C2A9", mid = "white") +
+  scale_fill_gradient2("average correlation with genes", low = "#A8896C", high = "#84C2A9", mid = "white",
+                       limits = c(-.31, .61), breaks = c(-.3, 0, .3, .6), labels = c("-0.3", "0", "0.3", "0.6")) +
   theme_minimal(base_size = 14) +
   theme(axis.title      = element_blank(),
         axis.ticks      = element_blank(),
@@ -3289,17 +3295,23 @@ gg_corrMatrix
 
 # 5) plot of the overview table of the uncorrected p-value tendencies
 gg_table <- plot_dat_longer %>% 
-  mutate(effect_type = case_when(effect_type == "ageLow"  ~ "age 21-49",
+  mutate(effect_type = case_when(effect_type == "divLow"  ~ "div. [2.8, 3.85)",
+                                 effect_type == "divHigh" ~ "div. [3.85, 4.4)",
+                                 effect_type == "ageLow"  ~ "age 21-49",
                                  effect_type == "ageHigh" ~ "age 50-69",
                                  effect_type == "sexM"    ~ "male",
                                  effect_type == "sexW"    ~ "female",
                                  effect_type == "bmiLow"  ~ "BMI [18, 25)",
                                  effect_type == "bmiHigh" ~ "BMI [25, 31]",
+                                 effect_type == "fibLow"  ~ "fiber (8, 30)",
+                                 effect_type == "fibHigh" ~ "fiber [30, 58)",
                                  TRUE                     ~ effect_type),
          effect_type = factor(effect_type, levels = c("overall",
-                                                      "age 50-69", "age 21-49",
+                                                      "div. [3.85, 4.4)", "div. [2.8, 3.85)",
+                                                      "BMI [25, 31]", "BMI [18, 25)",
                                                       "female", "male",
-                                                      "BMI [25, 31]", "BMI [18, 25)"))) %>% 
+                                                      "age 50-69", "age 21-49",
+                                                      "fiber [30, 58)", "fiber (8, 30)"))) %>% 
   ggplot(aes(x = intervention, y = effect_type)) +
   geom_tile(aes(fill = fill_tiles, alpha = alpha_tiles)) +
   geom_text(aes(label = value, alpha = alpha_value)) +
@@ -3320,7 +3332,6 @@ gg_table <- plot_dat_longer %>%
 gg_table +
   theme(panel.grid.minor = element_blank(),
         plot.background  = element_rect(fill = "white", color = "white"))
-ggsave("FigureSxxx_speciesScreening_trends.png", width = 9, height = 4.5)
 ```
 
 
