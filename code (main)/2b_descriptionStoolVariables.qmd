@@ -65,14 +65,29 @@ dat <- tse %>% colData() %>% as.data.frame()
 ```
 
 ```{r}
+# save the average T1/T3 baseline Shannon diversity as individual variable
+dat_baselineDiv <- dat %>% 
+  filter(timepoint %in% c("T1", "T3")) %>% 
+  group_by(participant_id) %>% 
+  summarize(baseline_div = mean(diversity_shannon, na.rm = TRUE))
+dat <- dat %>% 
+  dplyr::left_join(dat_baselineDiv, by = "participant_id")
+
 # categorize the age and bmi variables for testing category-specific intervention effects
+median_baselineDiv <- median(dat$baseline_div)
 dat <- dat %>% 
   mutate(age_cat = case_when(age < 50 ~ paste0(min(age), "-49"),
                              TRUE     ~ paste0("50-", max(age))),
          age_cat = factor(age_cat),
          bmi_cat = case_when(bmi_t0 < 25 ~ paste0("[", floor(min(bmi_t0)), ", 25)"),
                              TRUE        ~ paste0("[25, ", ceiling(max(bmi_t0)), "]")),
-         bmi_cat = factor(bmi_cat))
+         bmi_cat = factor(bmi_cat),
+         dailyFiber_cat  = case_when(dailyConsumption_fiber >= 30 ~ ">= 30g",
+                                     TRUE                         ~ "< 30g"),
+         dailyFiber_cat  = factor(dailyFiber_cat),
+         baselineDiv_cat = case_when(baseline_div < median_baselineDiv ~ "[2.8, 3.85)",
+                                     TRUE                              ~ "[3.85, 4.4)"),
+         baselineDiv_cat = factor(baselineDiv_cat))
 ```
 
 
@@ -596,6 +611,18 @@ gg_st <- dat %>%
         panel.grid.minor   = element_blank(),
         axis.title.x       = element_blank(),
         axis.text.x        = element_blank())
+gg_st_div <- dat %>% 
+  filter(!is.na(stool_type)) %>% 
+  mutate(stool_type = factor(stool_type)) %>% 
+  ggplot(aes(x = baselineDiv_cat, fill = stool_type)) +
+  geom_bar(position = "fill") +
+  theme_minimal(base_size = base_size) +
+  theme(legend.position    = "none",
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor   = element_blank(),
+        axis.title         = element_blank(),
+        axis.text.y        = element_blank(),
+        axis.text.x        = element_blank())
 gg_st_sex <- dat %>% 
   filter(!is.na(stool_type)) %>% 
   mutate(stool_type = factor(stool_type)) %>% 
@@ -627,6 +654,19 @@ gg_st_bmi <- dat %>%
   geom_bar(position = "fill") +
   scale_fill_discrete("stool type") +
   theme_minimal(base_size = base_size) +
+  theme(legend.position    = "none",
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor   = element_blank(),
+        axis.title         = element_blank(),
+        axis.text.y        = element_blank(),
+        axis.text.x        = element_blank())
+gg_st_fib <- dat %>% 
+  filter(!is.na(stool_type)) %>% 
+  mutate(stool_type = factor(stool_type)) %>% 
+  ggplot(aes(x = dailyFiber_cat, fill = stool_type)) +
+  geom_bar(position = "fill") +
+  scale_fill_discrete("stool type") +
+  theme_minimal(base_size = base_size) +
   theme(panel.grid.major.x = element_blank(),
         panel.grid.minor   = element_blank(),
         axis.title         = element_blank(),
@@ -646,6 +686,16 @@ gg_ph <- dat %>%
         panel.grid.major.x = element_blank(),
         panel.grid.minor   = element_blank(),
         axis.title.x       = element_blank(),
+        axis.text.x        = element_blank())
+gg_ph_div <- dat %>% 
+  ggplot(aes(x = baselineDiv_cat, y = ph_value)) +
+  geom_boxplot() +
+  stat_summary(fun = mean, geom = "point", shape = 18, size = 5, col = "gray20") +
+  theme_minimal(base_size = base_size) +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor   = element_blank(),
+        axis.title         = element_blank(),
+        axis.text.y        = element_blank(),
         axis.text.x        = element_blank())
 gg_ph_sex <- dat %>% 
   ggplot(aes(x = gender_new, y = ph_value)) +
@@ -677,6 +727,16 @@ gg_ph_bmi <- dat %>%
         axis.title         = element_blank(),
         axis.text.y        = element_blank(),
         axis.text.x        = element_blank())
+gg_ph_fib <- dat %>% 
+  ggplot(aes(x = dailyFiber_cat, y = ph_value)) +
+  geom_boxplot() +
+  stat_summary(fun = mean, geom = "point", shape = 18, size = 5, col = "gray20") +
+  theme_minimal(base_size = base_size) +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor   = element_blank(),
+        axis.title         = element_blank(),
+        axis.text.y        = element_blank(),
+        axis.text.x        = element_blank())
 
 # bowel movement frequency
 gg_bm <- dat %>% 
@@ -692,6 +752,17 @@ gg_bm <- dat %>%
         panel.grid.major.x = element_blank(),
         panel.grid.minor   = element_blank(),
         axis.title.x       = element_blank())
+gg_bm_div <- dat %>% 
+  filter(!is.na(bowelMov_new)) %>%
+  ggplot(aes(x = baselineDiv_cat, fill = bowelMov_new)) +
+  geom_bar(position = "fill") +
+  xlab("diversity") +
+  theme_minimal(base_size = base_size) +
+  theme(legend.position    = "none",
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor   = element_blank(),
+        axis.title.y       = element_blank(),
+        axis.text.y        = element_blank())
 gg_bm_sex <- dat %>% 
   filter(!is.na(bowelMov_new)) %>%
   ggplot(aes(x = gender_new, fill = bowelMov_new)) +
@@ -719,6 +790,17 @@ gg_bm_bmi <- dat %>%
   ggplot(aes(x = bmi_cat, fill = bowelMov_new)) +
   geom_bar(position = "fill") +
   xlab("BMI") +
+  theme_minimal(base_size = base_size) +
+  theme(legend.position    = "none",
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor   = element_blank(),
+        axis.title.y       = element_blank(),
+        axis.text.y        = element_blank())
+gg_bm_fib <- dat %>% 
+  filter(!is.na(bowelMov_new)) %>%
+  ggplot(aes(x = dailyFiber_cat, fill = bowelMov_new)) +
+  geom_bar(position = "fill") +
+  xlab("fiber") +
   scale_fill_discrete("bowel movement\nfrequency") +
   theme_minimal(base_size = base_size) +
   theme(panel.grid.major.x = element_blank(),
@@ -729,20 +811,20 @@ gg_bm_bmi <- dat %>%
 
 ```{r}
 #| column: page
-#| fig-width: 12
+#| fig-width: 16
 #| fig-height: 10
 #| warning: false
 #| message: false
 
 # joint plot
 layout <- "
-ABCD
-EFGH
-IJKL
+ABCDEF
+GHIJKL
+MNOPQR
 "
-gg_st + gg_st_sex + gg_st_age + gg_st_bmi +
-  gg_ph + gg_ph_sex + gg_ph_age + gg_ph_bmi +
-  gg_bm + gg_bm_sex + gg_bm_age + gg_bm_bmi +
+gg_st + gg_st_div + gg_st_age + gg_st_sex + gg_st_bmi + gg_st_fib +
+  gg_ph + gg_ph_div + gg_ph_age + gg_ph_sex + gg_ph_bmi + gg_ph_fib +
+  gg_bm + gg_bm_div + gg_bm_age + gg_bm_sex + gg_bm_bmi + gg_bm_fib +
   patchwork::plot_layout(design = layout)
-# ggsave("FigureS2_stoolVariables.png", width = 12, height = 10)
+# ggsave("FigureS2_stoolVariables.png", width = 16, height = 10)
 ```
