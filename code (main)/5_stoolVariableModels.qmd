@@ -86,7 +86,16 @@ dat_model <- dat_model %>%
                                   TRUE                        ~ "phase 1"),
          phase        = factor(phase))
 
-# categorize the age and bmi variables for testing category-specific intervention effects
+# save the average T1/T3 baseline Shannon diversity as individual variable
+dat_baselineDiv <- dat_model %>% 
+  filter(timepoint %in% c("T1", "T3")) %>% 
+  group_by(participant_id) %>% 
+  summarize(baseline_div = mean(diversity_shannon, na.rm = TRUE))
+dat_model <- dat_model %>% 
+  dplyr::left_join(dat_baselineDiv, by = "participant_id")
+
+# categorize interaction variables for testing category-specific intervention effects
+median_baselineDiv <- median(dat_model$baseline_div)
 dat_model <- dat_model %>% 
   mutate(age_centered50 = age - 50,
          bmi_centered25 = bmi_t0 - 25,
@@ -95,7 +104,13 @@ dat_model <- dat_model %>%
          age_cat = factor(age_cat),
          bmi_cat = case_when(bmi_t0 < 25 ~ paste0("[", floor(min(bmi_t0)), ", 25)"),
                              TRUE        ~ paste0("[25, ", ceiling(max(bmi_t0)), "]")),
-         bmi_cat = factor(bmi_cat))
+         bmi_cat = factor(bmi_cat),
+         dailyFiber_cat  = case_when(dailyConsumption_fiber >= 30 ~ ">= 30g",
+                                     TRUE                         ~ "< 30g"),
+         dailyFiber_cat  = factor(dailyFiber_cat),
+         baselineDiv_cat = case_when(baseline_div < median_baselineDiv ~ "[2.8, 3.85)",
+                                     TRUE                              ~ "[3.85, 4.4)"),
+         baselineDiv_cat = factor(baselineDiv_cat))
 ```
 
 
@@ -159,6 +174,62 @@ plot_residuals(m_st, title = paste0("Gaussian model\nExplained deviance: ", 100*
 summary(m_st)$p.table %>% 
   as.data.frame() %>% 
   filter(grepl("intervention", row.names(.))) %>% 
+  dplyr::rename(estimate = "Estimate",
+                sd_error = "Std. Error",
+                tvalue   = "t value",
+                pvalue   = "Pr(>|t|)") %>% 
+  mutate(CIlower  = estimate - qnorm(0.975)*sd_error,
+         CIupper  = estimate + qnorm(0.975)*sd_error,
+         estimate = round(estimate, 2),
+         CIlower  = round(CIlower, 2),
+         CIupper  = round(CIupper, 2),
+         pvalue   = round(pvalue, 4)) %>% 
+  select(estimate, CIlower, CIupper, pvalue) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+##### Diversity-stratified model
+
+Intervention effects for low diversity:
+
+```{r}
+# estimate model
+m_st_divInt <- estimate_model(dat_model, y = "stool_type", interaction_string = "intervention:baselineDiv_cat")
+
+# print intervention effects for low diversity people
+summary(m_st_divInt)$p.table %>% 
+  as.data.frame() %>% 
+  filter(grepl("intervention", row.names(.)),
+         !grepl("baselineDiv", row.names(.))) %>% 
+  dplyr::rename(estimate = "Estimate",
+                sd_error = "Std. Error",
+                tvalue   = "t value",
+                pvalue   = "Pr(>|t|)") %>% 
+  mutate(CIlower  = estimate - qnorm(0.975)*sd_error,
+         CIupper  = estimate + qnorm(0.975)*sd_error,
+         estimate = round(estimate, 2),
+         CIlower  = round(CIlower, 2),
+         CIupper  = round(CIupper, 2),
+         pvalue   = round(pvalue, 4)) %>% 
+  select(estimate, CIlower, CIupper, pvalue) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+Intervention effects for high diversity:
+
+```{r}
+# estimate model
+m_st_divInt_changedRef <- dat_model %>% 
+  mutate(baselineDiv_cat = relevel(baselineDiv_cat, ref = "[3.85, 4.4)")) %>% 
+  estimate_model(dat = ., y = "stool_type", interaction_string = "intervention:baselineDiv_cat")
+
+# print intervention effects for females
+summary(m_st_divInt_changedRef)$p.table %>% 
+  as.data.frame() %>% 
+  filter(grepl("intervention", row.names(.)),
+         !grepl("baselineDiv", row.names(.))) %>% 
   dplyr::rename(estimate = "Estimate",
                 sd_error = "Std. Error",
                 tvalue   = "t value",
@@ -345,6 +416,63 @@ summary(m_st_bmiInt_changedRef)$p.table %>%
 ```
 
 
+##### fiber-stratified model
+
+Intervention effects for low-fiber people:
+
+```{r}
+# estimate model
+m_st_fibInt <- estimate_model(dat_model, y = "stool_type", interaction_string = "intervention:dailyFiber_cat")
+
+# print intervention effects for low-fiber people
+summary(m_st_fibInt)$p.table %>% 
+  as.data.frame() %>% 
+  filter(grepl("intervention", row.names(.)),
+         !grepl("dailyFiber_cat", row.names(.))) %>% 
+  dplyr::rename(estimate = "Estimate",
+                sd_error = "Std. Error",
+                tvalue   = "t value",
+                pvalue   = "Pr(>|t|)") %>% 
+  mutate(CIlower  = estimate - qnorm(0.975)*sd_error,
+         CIupper  = estimate + qnorm(0.975)*sd_error,
+         estimate = round(estimate, 2),
+         CIlower  = round(CIlower, 2),
+         CIupper  = round(CIupper, 2),
+         pvalue   = round(pvalue, 4)) %>% 
+  select(estimate, CIlower, CIupper, pvalue) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+Intervention effects for high-fiber people:
+
+```{r}
+# estimate model
+m_st_fibInt_changedRef <- dat_model %>% 
+  mutate(dailyFiber_cat = relevel(dailyFiber_cat, ref = ">= 30g")) %>% 
+  estimate_model(dat = ., y = "stool_type", interaction_string = "intervention:dailyFiber_cat")
+
+# print intervention effects for high-fiber people
+summary(m_st_fibInt_changedRef)$p.table %>% 
+  as.data.frame() %>% 
+  filter(grepl("intervention", row.names(.)),
+         !grepl("dailyFiber_cat", row.names(.))) %>% 
+  dplyr::rename(estimate = "Estimate",
+                sd_error = "Std. Error",
+                tvalue   = "t value",
+                pvalue   = "Pr(>|t|)") %>% 
+  mutate(CIlower  = estimate - qnorm(0.975)*sd_error,
+         CIupper  = estimate + qnorm(0.975)*sd_error,
+         estimate = round(estimate, 2),
+         CIlower  = round(CIlower, 2),
+         CIupper  = round(CIupper, 2),
+         pvalue   = round(pvalue, 4)) %>% 
+  select(estimate, CIlower, CIupper, pvalue) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+
 
 ## Models on PH value
 
@@ -382,6 +510,63 @@ summary(m_ph)$p.table %>%
   kable() %>% 
   kable_styling()
 ```
+
+##### diversity-stratified model
+
+Intervention effects for low diversity:
+
+```{r}
+# estimate model
+m_ph_divInt <- estimate_model(dat_model, y = "ph_value", interaction_string = "intervention:baselineDiv_cat")
+
+# print intervention effects for low diversity people
+summary(m_ph_divInt)$p.table %>% 
+  as.data.frame() %>% 
+  filter(grepl("intervention", row.names(.)),
+         !grepl("baselineDiv_cat", row.names(.))) %>% 
+  dplyr::rename(estimate = "Estimate",
+                sd_error = "Std. Error",
+                tvalue   = "t value",
+                pvalue   = "Pr(>|t|)") %>% 
+  mutate(CIlower  = estimate - qnorm(0.975)*sd_error,
+         CIupper  = estimate + qnorm(0.975)*sd_error,
+         estimate = round(estimate, 2),
+         CIlower  = round(CIlower, 2),
+         CIupper  = round(CIupper, 2),
+         pvalue   = round(pvalue, 4)) %>% 
+  select(estimate, CIlower, CIupper, pvalue) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+Intervention effects for high diversity:
+
+```{r}
+# estimate model
+m_ph_divInt_changedRef <- dat_model %>% 
+  mutate(baselineDiv_cat = relevel(baselineDiv_cat, ref = "[3.85, 4.4)")) %>% 
+  estimate_model(dat = ., y = "ph_value", interaction_string = "intervention:baselineDiv_cat")
+
+# print intervention effects for high diversity people
+summary(m_ph_divInt_changedRef)$p.table %>% 
+  as.data.frame() %>% 
+  filter(grepl("intervention", row.names(.)),
+         !grepl("baselineDiv_cat", row.names(.))) %>% 
+  dplyr::rename(estimate = "Estimate",
+                sd_error = "Std. Error",
+                tvalue   = "t value",
+                pvalue   = "Pr(>|t|)") %>% 
+  mutate(CIlower  = estimate - qnorm(0.975)*sd_error,
+         CIupper  = estimate + qnorm(0.975)*sd_error,
+         estimate = round(estimate, 2),
+         CIlower  = round(CIlower, 2),
+         CIupper  = round(CIupper, 2),
+         pvalue   = round(pvalue, 4)) %>% 
+  select(estimate, CIlower, CIupper, pvalue) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
 
 ##### Gender-stratified model
 
@@ -554,6 +739,63 @@ summary(m_ph_bmiInt_changedRef)$p.table %>%
 ```
 
 
+##### fiber-stratified model
+
+Intervention effects for low-fiber people:
+
+```{r}
+# estimate model
+m_ph_fibInt <- estimate_model(dat_model, y = "ph_value", interaction_string = "intervention:dailyFiber_cat")
+
+# print intervention effects for low-fiber people
+summary(m_ph_fibInt)$p.table %>% 
+  as.data.frame() %>% 
+  filter(grepl("intervention", row.names(.)),
+         !grepl("dailyFiber_cat", row.names(.))) %>% 
+  dplyr::rename(estimate = "Estimate",
+                sd_error = "Std. Error",
+                tvalue   = "t value",
+                pvalue   = "Pr(>|t|)") %>% 
+  mutate(CIlower  = estimate - qnorm(0.975)*sd_error,
+         CIupper  = estimate + qnorm(0.975)*sd_error,
+         estimate = round(estimate, 2),
+         CIlower  = round(CIlower, 2),
+         CIupper  = round(CIupper, 2),
+         pvalue   = round(pvalue, 4)) %>% 
+  select(estimate, CIlower, CIupper, pvalue) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+Intervention effects for high-fiber people:
+
+```{r}
+# estimate model
+m_ph_fibInt_changedRef <- dat_model %>% 
+  mutate(dailyFiber_cat = relevel(dailyFiber_cat, ref = ">= 30g")) %>% 
+  estimate_model(dat = ., y = "ph_value", interaction_string = "intervention:dailyFiber_cat")
+
+# print intervention effects for high-fiber people
+summary(m_ph_fibInt_changedRef)$p.table %>% 
+  as.data.frame() %>% 
+  filter(grepl("intervention", row.names(.)),
+         !grepl("dailyFiber_cat", row.names(.))) %>% 
+  dplyr::rename(estimate = "Estimate",
+                sd_error = "Std. Error",
+                tvalue   = "t value",
+                pvalue   = "Pr(>|t|)") %>% 
+  mutate(CIlower  = estimate - qnorm(0.975)*sd_error,
+         CIupper  = estimate + qnorm(0.975)*sd_error,
+         estimate = round(estimate, 2),
+         CIlower  = round(CIlower, 2),
+         CIupper  = round(CIupper, 2),
+         pvalue   = round(pvalue, 4)) %>% 
+  select(estimate, CIlower, CIupper, pvalue) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+
 
 ## Models on bowel movement frequency
 
@@ -604,6 +846,70 @@ summary(m_bm)$p.table %>%
   kable() %>% 
   kable_styling()
 ```
+
+
+##### diversity-stratified model
+
+Intervention effects for low diversity:
+
+```{r}
+# estimate model
+m_bm_divInt <- estimate_model(dat_model, y = "bowelMovement_freq_binary", family = binomial(link = "logit"), interaction_string = "intervention:baselineDiv_cat")
+
+# print intervention effects for males
+summary(m_bm_divInt)$p.table %>% 
+  as.data.frame() %>% 
+  filter(grepl("intervention", row.names(.)),
+         !grepl("baselineDiv_cat", row.names(.))) %>% 
+  dplyr::rename(estimate = "Estimate",
+                sd_error = "Std. Error",
+                zvalue   = "z value",
+                pvalue   = "Pr(>|z|)") %>% 
+  mutate(CIlower      = estimate - qnorm(0.975)*sd_error,
+         CIupper      = estimate + qnorm(0.975)*sd_error,
+         exp_estimate = exp(estimate),
+         exp_CIlower  = exp(CIlower),
+         exp_CIupper  = exp(CIupper),
+         exp_estimate = round(exp_estimate, 2),
+         exp_CIlower  = round(exp_CIlower, 2),
+         exp_CIupper  = round(exp_CIupper, 2),
+         pvalue       = round(pvalue, 4)) %>% 
+  select(exp_estimate, exp_CIlower, exp_CIupper, pvalue) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+Intervention effects for high diversity:
+
+```{r}
+# estimate model
+m_bm_divInt_changedRef <- dat_model %>% 
+  mutate(baselineDiv_cat = relevel(baselineDiv_cat, ref = "[3.85, 4.4)")) %>% 
+  estimate_model(dat = ., y = "bowelMovement_freq_binary", family = binomial(link = "logit"), interaction_string = "intervention:baselineDiv_cat")
+
+# print intervention effects for high diversity
+summary(m_bm_divInt_changedRef)$p.table %>% 
+  as.data.frame() %>% 
+  filter(grepl("intervention", row.names(.)),
+         !grepl("baselineDiv_cat", row.names(.))) %>% 
+  dplyr::rename(estimate = "Estimate",
+                sd_error = "Std. Error",
+                zvalue   = "z value",
+                pvalue   = "Pr(>|z|)") %>% 
+  mutate(CIlower      = estimate - qnorm(0.975)*sd_error,
+         CIupper      = estimate + qnorm(0.975)*sd_error,
+         exp_estimate = exp(estimate),
+         exp_CIlower  = exp(CIlower),
+         exp_CIupper  = exp(CIupper),
+         exp_estimate = round(exp_estimate, 2),
+         exp_CIlower  = round(exp_CIlower, 2),
+         exp_CIupper  = round(exp_CIupper, 2),
+         pvalue       = round(pvalue, 4)) %>% 
+  select(exp_estimate, exp_CIlower, exp_CIupper, pvalue) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
 
 ##### Gender-stratified model
 
@@ -775,6 +1081,69 @@ summary(m_bm_bmiInt_changedRef)$p.table %>%
   as.data.frame() %>% 
   filter(grepl("intervention", row.names(.)),
          !grepl("bmi_cat", row.names(.))) %>% 
+  dplyr::rename(estimate = "Estimate",
+                sd_error = "Std. Error",
+                zvalue   = "z value",
+                pvalue   = "Pr(>|z|)") %>% 
+  mutate(CIlower      = estimate - qnorm(0.975)*sd_error,
+         CIupper      = estimate + qnorm(0.975)*sd_error,
+         exp_estimate = exp(estimate),
+         exp_CIlower  = exp(CIlower),
+         exp_CIupper  = exp(CIupper),
+         exp_estimate = round(exp_estimate, 2),
+         exp_CIlower  = round(exp_CIlower, 2),
+         exp_CIupper  = round(exp_CIupper, 2),
+         pvalue       = round(pvalue, 4)) %>% 
+  select(exp_estimate, exp_CIlower, exp_CIupper, pvalue) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+
+##### fiber-stratified model
+
+Intervention effects for low-fiber people:
+
+```{r}
+# estimate model
+m_bm_fibInt <- estimate_model(dat_model, y = "bowelMovement_freq_binary", family = binomial(link = "logit"), interaction_string = "intervention:dailyFiber_cat")
+
+# print intervention effects for low-fiber people
+summary(m_bm_fibInt)$p.table %>% 
+  as.data.frame() %>% 
+  filter(grepl("intervention", row.names(.)),
+         !grepl("dailyFiber_cat", row.names(.))) %>% 
+  dplyr::rename(estimate = "Estimate",
+                sd_error = "Std. Error",
+                zvalue   = "z value",
+                pvalue   = "Pr(>|z|)") %>% 
+  mutate(CIlower      = estimate - qnorm(0.975)*sd_error,
+         CIupper      = estimate + qnorm(0.975)*sd_error,
+         exp_estimate = exp(estimate),
+         exp_CIlower  = exp(CIlower),
+         exp_CIupper  = exp(CIupper),
+         exp_estimate = round(exp_estimate, 2),
+         exp_CIlower  = round(exp_CIlower, 2),
+         exp_CIupper  = round(exp_CIupper, 2),
+         pvalue       = round(pvalue, 4)) %>% 
+  select(exp_estimate, exp_CIlower, exp_CIupper, pvalue) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+Intervention effects for high-fiber people:
+
+```{r}
+# estimate model
+m_bm_fibInt_changedRef <- dat_model %>% 
+  mutate(dailyFiber_cat = relevel(dailyFiber_cat, ref = ">= 30g")) %>% 
+  estimate_model(dat = ., y = "bowelMovement_freq_binary", family = binomial(link = "logit"), interaction_string = "intervention:dailyFiber_cat")
+
+# print intervention effects for high-fiber people
+summary(m_bm_fibInt_changedRef)$p.table %>% 
+  as.data.frame() %>% 
+  filter(grepl("intervention", row.names(.)),
+         !grepl("dailyFiber_cat", row.names(.))) %>% 
   dplyr::rename(estimate = "Estimate",
                 sd_error = "Std. Error",
                 zvalue   = "z value",
