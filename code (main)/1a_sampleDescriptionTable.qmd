@@ -5,6 +5,8 @@ format:
     toc: true
     code-fold: true
     embed-resources: true
+editor_options: 
+  chunk_output_type: console
 ---
 
 ```{r packages}
@@ -75,6 +77,14 @@ Hypothesis tests:
 
 
 ```{r table preparations}
+# save the average T1/T3 baseline Shannon diversity as individual variable
+dat_baselineDiv <- dat %>% 
+  filter(timepoint %in% c("T1", "T3")) %>% 
+  group_by(participant_id) %>% 
+  summarize(baseline_div = mean(diversity_shannon, na.rm = TRUE))
+dat <- dat %>% 
+  dplyr::left_join(dat_baselineDiv, by = "participant_id")
+
 # create a dataset only with the relevant information
 dat_desc <- dat %>%
   distinct(participant_id, .keep_all = TRUE) %>% 
@@ -83,7 +93,8 @@ dat_desc <- dat %>%
                              bmi_t0 < 30   ~ "Overweight",
                              TRUE          ~ "Obesity I"),
          bmi_cat = factor(bmi_cat, levels = c("Underweight", "Normal", "Overweight", "Obesity I"))) %>% 
-  select(participant_id, group, gender, age, bmi_t0, bmi_cat)
+  select(participant_id, group, gender, age, bmi_t0, bmi_cat, dailyConsumption_fiber, baseline_div)
+
 
 # 1a) gender frequency table
 gender_tab          <- table(dat_desc$gender)
@@ -123,6 +134,36 @@ range_BMI_past  <- range(dat_desc$bmi_t0[dat_desc$group == "Pasteurized first"])
 
 # 3b) Welch test for BMI distribution between groups
 BMI_test <- t.test(dat_desc$bmi_t0 ~ dat_desc$group, var.equal = FALSE)
+
+
+# 4a) baseline diversity statistics
+mean_div        <- mean(dat_desc$baseline_div) %>% round(1)
+mean_div_fresh  <- mean(dat_desc$baseline_div[dat_desc$group == "Fresh first"]) %>% round(1)
+mean_div_past   <- mean(dat_desc$baseline_div[dat_desc$group == "Pasteurized first"]) %>% round(1)
+sd_div          <- sd(dat_desc$baseline_div)
+sd_div_fresh    <- sd(dat_desc$baseline_div[dat_desc$group == "Fresh first"])
+sd_div_past     <- sd(dat_desc$baseline_div[dat_desc$group == "Pasteurized first"])
+range_div       <- range(dat_desc$baseline_div) %>% round(1)
+range_div_fresh <- range(dat_desc$baseline_div[dat_desc$group == "Fresh first"]) %>% round(1)
+range_div_past  <- range(dat_desc$baseline_div[dat_desc$group == "Pasteurized first"]) %>% round(1)
+
+# 4b) Welch test for baseline diversity distribution between groups
+div_test <- t.test(dat_desc$baseline_div ~ dat_desc$group, var.equal = FALSE)
+
+
+# 5a) fiber statistics
+mean_fib        <- mean(dat_desc$dailyConsumption_fiber) %>% round(1)
+mean_fib_fresh  <- mean(dat_desc$dailyConsumption_fiber[dat_desc$group == "Fresh first"]) %>% round(1)
+mean_fib_past   <- mean(dat_desc$dailyConsumption_fiber[dat_desc$group == "Pasteurized first"]) %>% round(1)
+sd_fib          <- sd(dat_desc$dailyConsumption_fiber) %>% round(1)
+sd_fib_fresh    <- sd(dat_desc$dailyConsumption_fiber[dat_desc$group == "Fresh first"]) %>% round(1)
+sd_fib_past     <- sd(dat_desc$dailyConsumption_fiber[dat_desc$group == "Pasteurized first"]) %>% round(1)
+range_fib       <- range(dat_desc$dailyConsumption_fiber) %>% round(1)
+range_fib_fresh <- range(dat_desc$dailyConsumption_fiber[dat_desc$group == "Fresh first"]) %>% round(1)
+range_fib_past  <- range(dat_desc$dailyConsumption_fiber[dat_desc$group == "Pasteurized first"]) %>% round(1)
+
+# 4b) Welch test for fiber distribution between groups
+fib_test <- t.test(dat_desc$dailyConsumption_fiber ~ dat_desc$group, var.equal = FALSE)
 ```
 
 
@@ -130,26 +171,36 @@ BMI_test <- t.test(dat_desc$bmi_t0 ~ dat_desc$group, var.equal = FALSE)
 data.frame(Characteristic = c("N",
                               "Sex - Male", "Sex - Female",
                               "mean Age +/- std. dev. (min. - max.)",
-                              "mean BMI +/- std. dev. (min. - max.)"),
+                              "mean BMI +/- std. dev. (min. - max.)",
+                              "mean baseline div. +/- std. dev. (min. - max.)",
+                              "mean fiber +/- std. dev. (min. - max.)"),
            Full_sample    = c(dat %>% pull(participant_id) %>% unique() %>% length(),
                               paste0(gender_tab["M"], " (", 100*round(gender_pTab["M"], 3), "%)"),
                               paste0(gender_tab["W"], " (", 100*round(gender_pTab["W"], 3), "%)"),
                               paste0(mean_age, " +/- ", round(sd_age, 1), " (", paste(range_age, collapse = " - "), ")"),
-                              paste0(mean_BMI, " +/- ", round(sd_BMI, 1), " (", paste(range_BMI, collapse = " - "), ")")),
+                              paste0(mean_BMI, " +/- ", round(sd_BMI, 1), " (", paste(range_BMI, collapse = " - "), ")"),
+                              paste0(mean_div, " +/- ", round(sd_div, 1), " (", paste(range_div, collapse = " - "), ")"),
+                              paste0(mean_fib, " +/- ", round(sd_fib, 1), " (", paste(range_fib, collapse = " - "), ")")),
            Fresh_first    = c(dat %>% filter(group == "Fresh first") %>%  pull(participant_id) %>% unique() %>% length(),
                               paste0(gender_tab_grouped["Fresh first", "M"], " (", 100*round(gender_pTab_grouped["Fresh first", "M"], 3), "%)"),
                               paste0(gender_tab_grouped["Fresh first", "W"], " (", 100*round(gender_pTab_grouped["Fresh first", "W"], 3), "%)"),
                               paste0(mean_age_fresh, " +/- ", round(sd_age_fresh, 1), " (", paste(range_age_fresh, collapse = " - "), ")"),
-                              paste0(mean_BMI_fresh, " +/- ", round(sd_BMI_fresh, 1), " (", paste(range_BMI_fresh, collapse = " - "), ")")),
+                              paste0(mean_BMI_fresh, " +/- ", round(sd_BMI_fresh, 1), " (", paste(range_BMI_fresh, collapse = " - "), ")"),
+                              paste0(mean_div_fresh, " +/- ", round(sd_div_fresh, 1), " (", paste(range_div_fresh, collapse = " - "), ")"),
+                              paste0(mean_fib_fresh, " +/- ", round(sd_fib_fresh, 1), " (", paste(range_fib_fresh, collapse = " - "), ")")),
            Past_first     = c(dat %>% filter(group == "Pasteurized first") %>%  pull(participant_id) %>% unique() %>% length(),
                               paste0(gender_tab_grouped["Pasteurized first", "M"], " (", 100*round(gender_pTab_grouped["Pasteurized first", "M"], 3), "%)"),
                               paste0(gender_tab_grouped["Pasteurized first", "W"], " (", 100*round(gender_pTab_grouped["Pasteurized first", "W"], 3), "%)"),
                               paste0(mean_age_past, " +/- ", round(sd_age_past, 1), " (", paste(range_age_past, collapse = " - "), ")"),
-                              paste0(mean_BMI_past, " +/- ", round(sd_BMI_past, 1), " (", paste(range_BMI_past, collapse = " - "), ")")),
+                              paste0(mean_BMI_past, " +/- ", round(sd_BMI_past, 1), " (", paste(range_BMI_past, collapse = " - "), ")"),
+                              paste0(mean_div_past, " +/- ", round(sd_div_past, 1), " (", paste(range_div_past, collapse = " - "), ")"),
+                              paste0(mean_fib_past, " +/- ", round(sd_fib_past, 1), " (", paste(range_fib_past, collapse = " - "), ")")),
            p_value        = c("",
                               round(gender_test$p.value, 4), "",
                               round(age_test$p.value, 4),
-                              round(BMI_test$p.value, 4))) %>% 
+                              round(BMI_test$p.value, 4),
+                              round(div_test$p.value, 4),
+                              round(fib_test$p.value, 4))) %>% 
   rename("Full sample"              = Full_sample,
          "Fresh intervention first" = Fresh_first,
          "Past. intervention first" = Past_first,
