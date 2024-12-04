@@ -555,6 +555,7 @@ readAndPrepare_lookupData <- function(path_sampleLookupXlsx,
   # mark and exclude medicated participants ---------------------------------
   dat_stool <- dat_stool %>% 
     mutate(subject_isMedicated = case_when(grepl("SK005", subject_time) ~ "yes",
+                                           grepl("SK086", subject_time) ~ "yes",
                                            grepl("SK093", subject_time) ~ "yes",
                                            TRUE                         ~ "no"),
            subject_isMedicated = factor(subject_isMedicated))
@@ -569,19 +570,15 @@ readAndPrepare_lookupData <- function(path_sampleLookupXlsx,
   
   # mark and exclude sick participants --------------------------------------
   # taxonomy paper
-  biased_stoolMeasurements <- c("SK073_T5", "SK086_T1", "SK086_T2", "SK086_T3",
-                                "SK086_T4", "SK086_T5")
+  biased_stoolMeasurements <- c("SK073_T5")
   
   # stool type analysis
   biased_stoolTypeMeasurements <- c("SK026_T2", "SK064_T3", "SK070_T1", "SK073_T5",
-                                    "SK085_T2", "SK086_T1", "SK086_T2", "SK086_T3",
-                                    "SK086_T4", "SK086_T5", "SK090_T2", "SK092_T3")
+                                    "SK085_T2", "SK090_T2", "SK092_T3")
   # blood paper
   biased_bloodMeasurements <- c("SK007_T1", "SK009_T3", "SK035_T2", "SK050_T1",
                                 "SK053_T5", "SK064_T3", "SK070_T1", "SK073_T3",
-                                "SK073_T5", "SK080_T2", "SK085_T2", "SK086_T1",
-                                "SK086_T2", "SK086_T3", "SK086_T4", "SK086_T5",
-                                "SK094_T3", "SK094_T5")
+                                "SK073_T5", "SK080_T2", "SK085_T2", "SK094_T3", "SK094_T5")
   
   # add information to the dataset
   dat_stool <- dat_stool %>% 
